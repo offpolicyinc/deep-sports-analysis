@@ -217,7 +217,7 @@ def videos(project: str, players: list[str], out_dir: Path, make: bool, extra: d
         out[k] = {"avg": clip(c["avg"], "average"),
                   "players": {q: [clip(i, nth(q.lower(), j)) for j, i in enumerate(ix)] for q, ix in c["players"].items()}}
         for q, ix in mine[k].items():
-            out[k]["players"][label_of(q, extra)] = [clip(i, nth(label_of(q, extra).lower(), j), extra[q][0])
+            out[k]["players"][label_of(q, extra)] = [clip(i, nth(label_of(q, extra).lower().replace(" ", "_"), j), extra[q][0])
                                                       for j, i in enumerate(ix)]
     print(len(jobs), "clips", flush=True)
     with ThreadPoolExecutor(6) as ex:
@@ -236,10 +236,9 @@ def moments(pose: np.ndarray, win: list) -> dict[str, int]:
     return ph
 
 
-def panel(project: str, players: list[str], order: list[tuple[str, str]], clips: dict | None = None,
-          extra: dict | None = None) -> str:
-    """The 2 x 2 panel (two clips, the skeleton, the boxes) and the data and code that drive it. players: the pros
-    and our own (extra: guests), who are set against all the pros."""
+def panel_data(project: str, players: list[str], order: list[tuple[str, str]], clips: dict | None = None,
+               extra: dict | None = None) -> tuple[dict, list[str]]:
+    """What drives the panel (poses, measures, feet, clips, which are ours), and the players its menu offers."""
     from dsa.pages.profiles_report import SHORT, UNIT, UNSURE, guest_medians, heat_z, label_of, load, spread, tests, value
 
     extra = extra or {}
@@ -274,8 +273,8 @@ def panel(project: str, players: list[str], order: list[tuple[str, str]], clips:
         if "stance_side_m" in f:
             i, j = f.index("stance_side_m"), f.index("stance_fwd_m")
             stance[k] = {surname(q): [res[k]["box"][q][i][2], res[k]["box"][q][j][2]] for q in pros if q in res[k]["box"]}
-            ours_st = {surname(q): [guest_medians(extra, k, "stance_side_m").get(q, np.nan),
-                                    guest_medians(extra, k, "stance_fwd_m").get(q, np.nan)] for q in extra}
+            side, fwd = guest_medians(extra, k, "stance_side_m"), guest_medians(extra, k, "stance_fwd_m")
+            ours_st = {surname(q): [side[q], fwd[q]] for q in extra if q in side and q in fwd}   # none: no NaN
             stance[k]["rest"] = {q: np.median(np.array([v for o, v in stance[k].items() if o != q]), 0).tolist()
                                  for q in stance[k]}
             stance[k]["rest"].update({q: np.median(np.array([v for o, v in stance[k].items() if o != "rest"]), 0).tolist()
@@ -309,9 +308,17 @@ def panel(project: str, players: list[str], order: list[tuple[str, str]], clips:
                          # who stands out most on it (shown when no one is pointed at)
                          "top": surname(max((q for q in zs[k, n] if q not in UNSURE and q in pros),
                                             key=lambda q: abs(zs[k, n][q])))})
-    data = json.dumps({"kinds": kinds, "measures": measures, "stance": stance, "clips": clips or {}, "ours": sorted(ours)},
-                      separators=(",", ":")).replace("</", "<\\/")
-    pick = "".join(f'<option value="{q}">{q}</option>' for q in sorted(surname(p) for p in pros) + sorted(ours))
+    return ({"kinds": kinds, "measures": measures, "stance": stance, "clips": clips or {}, "ours": sorted(ours)},
+            sorted(surname(p) for p in pros) + sorted(ours))
+
+
+def panel(project: str, players: list[str], order: list[tuple[str, str]], clips: dict | None = None,
+          extra: dict | None = None) -> str:
+    """The 2 x 2 panel (two clips, the skeleton, the boxes) and the data and code that drive it. players: the pros
+    and our own (extra: guests), who are set against all the pros."""
+    D, names = panel_data(project, players, order, clips, extra)
+    data = json.dumps(D, separators=(",", ":")).replace("</", "<\\/")
+    pick = "".join(f'<option value="{q}">{q}</option>' for q in names)
     return (f'<div class="explain"><label class="ex-ref">Compare with <select id="ex-ref"><option value="">Average'
             f'</option>{pick}</select></label><div class="ex-cap"><b id="ex-title"></b>'
             f'<p id="ex-say"></p></div><div class="ex-grid">'

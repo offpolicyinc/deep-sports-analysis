@@ -100,6 +100,50 @@ PROJECTS = {
             "2025_richard": ("data/raw/tennis_videos/peter_richard_20250614.mp4", "Practice vs Richard Pham", 0, 0),   # SwingVision export, points only; YouTube kbBfuwNfNj8, 60 fps
         },
     },
+    "others": {
+        "what": "Footage other players sent us (SwingVision and YouTube, phones behind the baseline), for how their "
+                "strokes compare with the atp_hardcourt players'. Each match whole, in pieces of about 20 min (_x<k>): "
+                "20 min gave 10-15 routine near-end forehands per player but only 2-5 backhands and serves. Who is who: names.json, by hand. "
+                "Players by letter: who they are is in data/raw/other_players, not here.",
+        "players": ["Player A", "Player B", "Player C", "Player D", "Player E", "Player F", "Player G"],
+        # m, guessed from the footage (none told us yet): only for dsa.measure.profiles' phone foreshortening
+        "heights": {"Player A": 1.63, "Player B": 1.80, "Player C": 1.80, "Player D": 1.55, "Player E": 1.80,
+                    "Player F": 1.78, "Player G": 1.73},
+        "compare_with": "atp_hardcourt",
+        "strokes": True,
+        # dsa.measure.technique's feed test off: filmed low from just behind the near player, the ball from the other
+        # end never shows above his head (it kept 1 of 38 forehands in G's, 0 of 11 in C's YouTube one; elsewhere it
+        # drops one or two)
+        "phone": True,                         # dsa.measure.technique.PHONE_DEPTH
+        "no_feed_check": ["2026_g", "2025_c_yt", "2025_c_yt_x2"],
+        "blur": {"2026_g": [[0, 0, 460, 230]]},    # dsa.pages.exemplars: the app's scoreboard, with both players' names
+        # name: (recording on the external drive, match, start s, seconds kept; 0 = all, (player, opponent)).
+        # Left out: three 12-16 s screen recordings of the SwingVision app (portrait, its UI on top)
+        "videos": {
+            "2026_a": ("data/raw/other_players/player_a.mp4", "Player A vs Opponent A", 0, 1200, ('Player A', 'Opponent A')),
+            "2026_a_x2": ("data/raw/other_players/player_a.mp4", "Player A vs Opponent A", 1200, 1456, ('Player A', 'Opponent A')),
+            "2026_a_x3": ("data/raw/other_players/player_a.mp4", "Player A vs Opponent A", 2656, 0, ('Player A', 'Opponent A')),
+            "2024_b": ("data/raw/other_players/player_b.mp4", "Player B vs Opponent B", 0, 1200, ('Player B', 'Opponent B')),
+            "2024_b_x2": ("data/raw/other_players/player_b.mp4", "Player B vs Opponent B", 1200, 1328, ('Player B', 'Opponent B')),
+            "2024_b_x3": ("data/raw/other_players/player_b.mp4", "Player B vs Opponent B", 2528, 1328, ('Player B', 'Opponent B')),
+            "2024_b_x4": ("data/raw/other_players/player_b.mp4", "Player B vs Opponent B", 3856, 1328, ('Player B', 'Opponent B')),
+            "2024_b_x5": ("data/raw/other_players/player_b.mp4", "Player B vs Opponent B", 5184, 0, ('Player B', 'Opponent B')),
+            "2025_c_sv": ("data/raw/other_players/player_c_swingvision.mp4", "Player C vs Opponent C, college match", 0, 900, ('Player C', 'Opponent C')),
+            "2025_c_sv_x2": ("data/raw/other_players/player_c_swingvision.mp4", "Player C vs Opponent C, college match", 900, 1190, ('Player C', 'Opponent C')),
+            "2025_c_sv_x3": ("data/raw/other_players/player_c_swingvision.mp4", "Player C vs Opponent C, college match", 2090, 0, ('Player C', 'Opponent C')),
+            "2025_c_yt": ("data/raw/other_players/player_c_youtube.mp4", "Player C vs Opponent C2, league playoff", 0, 900, ('Player C', 'Opponent C2')),
+            "2025_c_yt_x2": ("data/raw/other_players/player_c_youtube.mp4", "Player C vs Opponent C2, league playoff", 900, 0, ('Player C', 'Opponent C2')),
+            "2026_g": ("data/raw/other_players/player_g.mp4", "Player G vs Opponent G", 0, 0, ('Player G', 'Opponent G')),
+            "2026_d": ("data/raw/other_players/player_d_match.mp4", "Player D vs Opponent D", 0, 1200, ('Player D', 'Opponent D')),
+            "2026_d_x2": ("data/raw/other_players/player_d_match.mp4", "Player D vs Opponent D", 1200, 1396, ('Player D', 'Opponent D')),
+            "2026_d_x3": ("data/raw/other_players/player_d_match.mp4", "Player D vs Opponent D", 2596, 1396, ('Player D', 'Opponent D')),
+            "2026_d_x4": ("data/raw/other_players/player_d_match.mp4", "Player D vs Opponent D", 3992, 1396, ('Player D', 'Opponent D')),
+            "2026_d_x5": ("data/raw/other_players/player_d_match.mp4", "Player D vs Opponent D", 5388, 0, ('Player D', 'Opponent D')),
+            "2026_d_drill": ("data/raw/other_players/player_d_drill.mp4", "Player D, drill: a coach feeds from the far end", 0, 0, ("Player D (drill)", "coach")),   # fed balls from 3 m inside the baseline: kept apart from his match
+            "2026_e": ("data/raw/other_players/player_e.mp4", "Player E vs Opponent E", 0, 0, ('Player E', 'Opponent E')),
+            "2026_f": ("data/raw/other_players/player_f.mp4", "Player F vs Opponent F", 0, 0, ('Player F', 'Opponent F')),
+        },
+    },
     "atp_hardcourt": {
         "what": "Today's and recent ATP players at the Australian Open and US Open (hard courts, the same "
                 "broadcasts), three to four matches each, for how their strokes and movement differ. Matches between "

@@ -5,7 +5,7 @@ import json
 
 import numpy as np
 
-from dsa.paths import video_dir
+from dsa.paths import hits_file, video_dir
 from dsa.scene.court import phone_saved
 from dsa.scene.court import tv as court_tv
 
@@ -29,13 +29,13 @@ def points(hits: list[dict], pieces: list[tuple[int, int]], fps: float) -> list[
 
 def load(spec: str) -> dict:
     """A video's results after step 4, read once: its frames' boxes, skeletons and ball (raw.npz), the court,
-    who is at each end (players.json), names, hits (strokes/strokes.json) and where its pieces start."""
+    who is at each end (players.json), names, hits (dsa.paths.hits_file) and where its pieces start."""
     src = video_dir(spec)
     z = np.load(src / "raw.npz")
     cut = np.cumsum(z["n"])[:-1]
     pl = json.loads((src / "players.json").read_text())
     names = json.loads((src / "names.json").read_text()) if (src / "names.json").exists() else {}
-    sj, kj = src / "strokes/strokes.json", src / "kept.json"
+    sj, kj = hits_file(src), src / "kept.json"
     total = len(pl["near_far"])
     starts = np.cumsum([0] + [b - a for a, b in json.loads(kj.read_text())["pieces"]]) if kj.exists() else np.array([0, total])
     return {"src": src, "video": str(src / ("kept.mp4" if kj.exists() else "source.mp4")),

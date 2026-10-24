@@ -21,7 +21,9 @@ plus Opus. Where files live: [STORAGE.md](STORAGE.md).
 | 5 | Stroke and movement measurements | `dsa.measure.technique`, `dsa.measure.movement`, `dsa.measure.syllables` | laptop (syllables: Modal) | done |
 | 6 | Compare: one player's eras, or players with each other | `dsa.measure.technique analyse`, `dsa.measure.profiles` | laptop | done; profiles new |
 
-Phone footage skips 0–1, and step 2 skips F3ED.
+Phone footage skips 0–1, and step 2 skips F3ED (unless the project sets `strokes`).
+
+Step 2 also runs on Google Cloud (`dsa.gpu.gcp`, project wc3env-pw): one VM with an L4 takes a list of videos, two side by side, through the bucket gs://wc3env-pw-dsa (laid out as the data root), then deletes itself. The project may have one GPU at a time (raising it was refused in Oct 2026), so it suits a few videos, not a batch: phone footage runs at about a quarter of real time per video, two at once (5 min in 20 min).
 
 ## What each step does
 
@@ -87,6 +89,7 @@ python -m dsa.ingest.download get federer_usopen/2015                  # downloa
 modal run src/dsa/gpu/app.py --videos federer_usopen/2015 --cuts   # 0 on Modal, brings back kept.mp4
 python -m dsa.gpu.cuts review federer_usopen/2015                   # check 0 by eye
 modal run --detach src/dsa/gpu/app.py --videos federer_usopen/2015  # 2; again afterwards to collect
+python -m dsa.gpu.gcp run others/2026_e,others/2026_g        # 2 on GCP instead; again afterwards to collect
 python -m dsa.gpu.strokes federer_usopen/2015 --preview             # video with the stroke labels
 python -m dsa.scene.run federer_usopen/2015                           # 3 (--test: on the test run)
 python -m dsa.scene.names federer_usopen/2015                         # 4 (--test: on the test run)

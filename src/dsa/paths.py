@@ -7,7 +7,8 @@ path when it moves between them (docs/STORAGE.md).
         source.mp4                  the video as analysed (TV: its first hour)
         cuts/                       dsa.gpu.cuts: shots.json, review.json, thumbs/, proxy.mp4
         raw.npz                     dsa.gpu.process: people, ball, court, skeletons (raw.pass1.npz while it runs)
-        strokes/                    dsa.gpu.strokes: input.mp4 (224 high), scores.npz, strokes.json
+        strokes/                    dsa.gpu.strokes: input.mp4 (224 high), scores.npz, strokes.json; labels.json
+                                    (dsa.ingest.labels: SwingVision's or by eye, read in place of strokes.json)
         court/                      dsa.scene.court: Opus court answers (phone)
         players.json                dsa.scene.run
         names.json, render.mp4      dsa.scene.names, dsa.pages.render
@@ -29,3 +30,8 @@ def video_dir(spec: str) -> Path:
     """'federer_usopen/2015' -> projects/federer_usopen/2015/."""
     project, video = spec.split("/")
     return PROJECTS / project / video
+
+
+def hits_file(d: Path) -> Path:
+    """A video folder's hits: strokes/labels.json (SwingVision's, or by eye) when there is one, else F3ED's."""
+    return d / "strokes/labels.json" if (d / "strokes/labels.json").exists() else d / "strokes/strokes.json"
