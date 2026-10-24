@@ -101,21 +101,23 @@ def coach(extra: dict, order: list[tuple[str, str]], cache) -> dict[str, dict]:
 
 
 def box(extra: dict, answers: dict) -> str:
-    """Claude's answers, one player at a time (the page's .claude box and its buttons)."""
-    who = list(extra)
-    key = lambda q: label_of(q, extra).lower()                  # noqa: E731
+    """Claude's answers, one player at a time, laid out as the page's Figure 7 (figure.claudefig: its .seg buttons,
+    one .adv row per stroke and its fix, then what to work on first)."""
+    who, e = list(extra), html.escape
+    key = lambda q: label_of(q, extra).lower().replace(" ", "-")            # noqa: E731
     buttons = "".join(f'<button data-who="{key(q)}" aria-pressed="{str(i == 0).lower()}">{label_of(q, extra)}</button>'
                       for i, q in enumerate(who))
     parts = []
     for i, q in enumerate(who):
-        a, e = answers[q], html.escape
-        body = "".join(f'<p><b>{s["kind"].capitalize()}: {e(s["headline"].rstrip("."))}.</b> {e(s["lead"])}</p>'
-                       f'<ul class="support">{"".join(f"<li>{e(p)}</li>" for p in s["points"])}'
-                       f'<li><b>Fix:</b> {e(s["fix"])}</li></ul>' for s in a["strokes"])
-        parts.append(f'<div data-for="{key(q)}"{"" if i == 0 else " hidden"}>{body}'
-                     f'<p><b>In order:</b> {e(a["order"])}</p></div>')
-    return (f'<div class="claude"><div class="claude-head"><span class="claude-tag">Claude</span>'
-            f'<span class="claude-who">{buttons}</span></div>{"".join(parts)}</div>')
+        a = answers[q]
+        rows = "".join(f'<div class="adv"><h4>{s["kind"].capitalize()}</h4><div><p class="adv-h">{e(s["headline"])}</p>'
+                       f'<p>{e(s["lead"])}</p><ul>{"".join(f"<li>{e(p)}</li>" for p in s["points"])}</ul>'
+                       f'<p class="adv-fix"><span>Fix</span>{e(s["fix"])}</p></div></div>\n' for s in a["strokes"])
+        parts.append(f'<div data-for="{key(q)}"{"" if i == 0 else " hidden"}>\n{rows}'
+                     f'<div class="adv"><h4>In order</h4><div><p>{e(a["order"])}</p></div></div>\n</div>\n')
+    return (f'<section class="wrap"><figure class="claudefig" id="claude-o"><div class="claude"><div class="claude-head">'
+            f'<span class="claude-tag">Claude\'s advice for</span><span class="seg">{buttons}</span></div>\n'
+            f'{"".join(parts)}</div></figure></section>')                   # .wrap: the text's width, as Figure 7
 
 
 def figure(svg: str, data: dict, names: list[str], n_ours: int) -> str:
