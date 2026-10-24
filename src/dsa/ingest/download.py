@@ -104,8 +104,8 @@ def get(spec: str) -> None:
         src, start_s = p["videos"][video]
         cut(src, start_s, p["seconds"], out)
         return
-    if project == "own":
-        src, _, start_s, seconds = p["videos"][video]
+    if project in ("own", "others"):
+        src, _, start_s, seconds = p["videos"][video][:4]
         if src.startswith("yt:"):                   # one of ours on YouTube: the whole upload to raw/own/ first
             full = ROOT / "raw" / project / f"{src[3:]}.mp4"
             if not full.exists():

@@ -13,6 +13,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
+from dsa.ingest.projects import PROJECTS
 from dsa.measure.technique import GRID, HZ
 from dsa.paths import video_dir
 
@@ -36,11 +37,15 @@ def _frames(spec: str, frame: int, fps: float, t0: float, t1: float = T1) -> dic
     cap = cv2.VideoCapture(str(d / "kept.mp4" if (d / "kept.mp4").exists() else d / "source.mp4"))   # phone: no cut
     a, b = frame + int(np.floor(t0 * fps)) - 1, frame + int(np.ceil(t1 * fps)) + 1
     cap.set(cv2.CAP_PROP_POS_FRAMES, max(a, 0))
+    project, video = spec.split("/", 1)
+    hide = PROJECTS.get(project, {}).get("blur", {}).get(video, [])      # source px boxes: names burned in
     out = {}
     for g in range(max(a, 0), b + 1):
         ok, img = cap.read()
         if not ok:
             break
+        for x0, y0, x1, y1 in hide:
+            img[y0:y1, x0:x1] = cv2.GaussianBlur(img[y0:y1, x0:x1], (0, 0), 25)
         out[g] = img
     return out
 

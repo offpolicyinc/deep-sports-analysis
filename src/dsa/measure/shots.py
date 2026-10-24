@@ -21,7 +21,7 @@ from collections import Counter
 
 from dsa.ingest.projects import PROJECTS, pair
 from dsa.paths import PROJECTS as ROOT_PROJECTS
-from dsa.paths import video_dir
+from dsa.paths import hits_file, video_dir
 
 WINDOW = 1.0                    # seconds either side of a hit
 CHECKS = 8                      # serves read off the scoreboard per video
@@ -46,7 +46,7 @@ def owners(spec: str) -> list[tuple[dict, str | None]]:
     d = video_dir(spec)
     pl = json.loads((d / "players.json").read_text())
     names = json.loads((d / "names.json").read_text())
-    hits = json.loads((d / "strokes/strokes.json").read_text())["hits"]
+    hits = json.loads(hits_file(d).read_text())["hits"]
     kj = d / "kept.json"
     lengths = [b - a for a, b in json.loads(kj.read_text())["pieces"]] if kj.exists() else [len(pl["near_far"])]
     bounds, s = [], 0
@@ -57,7 +57,7 @@ def owners(spec: str) -> list[tuple[dict, str | None]]:
     for h in hits:
         i, (lo, hi) = next((i, (a, b)) for i, (a, b) in enumerate(bounds) if a <= h["frame"] < b)
         k = player_at(pl["near_far"], h["frame"], 0 if h["side"] == "near" else 1, lo, hi, half)
-        out.append((h, player_of(names, i, k, both)))
+        out.append((h, h.get("player") or player_of(names, i, k, both)))       # labels may name him
     return out
 
 

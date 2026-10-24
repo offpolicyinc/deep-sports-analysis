@@ -55,7 +55,9 @@ def frames(video: str, limit: int = 0, start: int = 0):
 def cut(src: str, start: float, seconds: float, out: Path) -> None:
     """A clip at 30 fps, at most 1080p, no sound."""
     out.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out.with_name(out.stem + ".part" + out.suffix)     # named `out` only once whole
     subprocess.run(["ffmpeg", "-v", "error", "-y", "-ss", str(start), "-i", src, "-t", str(seconds), "-r", "30",
                     "-vf", "scale=-2:'min(1080,ih)'", "-an", "-c:v", "libx264", "-crf", "18", "-preset", "veryfast",
-                    str(out)], check=True)
+                    str(tmp)], check=True)
+    tmp.rename(out)
 

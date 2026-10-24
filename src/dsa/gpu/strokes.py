@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -25,7 +26,6 @@ ELEMENTS = ("near far deuce middle ad serve return stroke fh bh gs slice volley 
 GROUPS = {"side": (0, 2), "position": (2, 5), "shot": (5, 8), "direction": (16, 24), "outcome": (25, 29)}
 STROKE_GROUPS = {"hand": (8, 10), "technique": (10, 16)}      # not for serves
 APPROACH, NMS = 24, 5
-FRAMES, LIST = "/tmp/frames", "/tmp/pieces.json"
 
 
 def f3ed(video: str, lengths: list[int], fps: float) -> dict:
@@ -38,14 +38,17 @@ def f3ed(video: str, lengths: list[int], fps: float) -> dict:
 
     tc = timm.create_model                                    # the backbone's weights come from the checkpoint
     timm.create_model = lambda n, pretrained=False, **k: tc(n, pretrained=False, **k)
+    # beside the video's own copy: dsa.gpu.gcp runs two videos at once on one VM, and a shared /tmp/frames gave
+    # one video the other's strokes
+    frames, pieces = f"{video}.frames", f"{video}.pieces.json"
     cap = cv2.VideoCapture(video)
     for k, n in enumerate(lengths):
-        Path(f"{FRAMES}/{k}").mkdir(parents=True, exist_ok=True)
+        Path(f"{frames}/{k}").mkdir(parents=True, exist_ok=True)
         for i in range(n):
             ok, f = cap.read()
             assert ok, f"{video} ends early at piece {k}, frame {i}"
             h, w = f.shape[:2]
-            cv2.imwrite(f"{FRAMES}/{k}/{i:06d}.jpg", cv2.resize(f, (w * 224 // h, 224)))
+            cv2.imwrite(f"{frames}/{k}/{i:06d}.jpg", cv2.resize(f, (w * 224 // h, 224)))
     here = os.getcwd()
     os.chdir(F3SET)
     sys.path.insert(0, str(F3SET))
@@ -58,9 +61,9 @@ def f3ed(video: str, lengths: list[int], fps: float) -> dict:
     model = F3Set(len(classes), cfg["feature_arch"], cfg["temporal_arch"], clip_len=cfg["clip_len"],
                   step=cfg["stride"], window=cfg["window"], use_ctx=cfg["use_ctx"], multi_gpu=False)
     model.load(torch.load(F3ED / "checkpoint_049.pt"))
-    Path(LIST).write_text(json.dumps([{"video": str(k), "fps": fps, "num_frames": n, "far_hand": "RH",
+    Path(pieces).write_text(json.dumps([{"video": str(k), "fps": fps, "num_frames": n, "far_hand": "RH",
                                        "near_hand": "RH", "events": []} for k, n in enumerate(lengths)]))
-    ds = ActionSeqVideoDataset(classes, LIST, FRAMES, cfg["clip_len"], overlap_len=cfg["clip_len"] // 2,
+    ds = ActionSeqVideoDataset(classes, pieces, frames, cfg["clip_len"], overlap_len=cfg["clip_len"] // 2,
                                crop_dim=cfg["crop_dim"], stride=cfg["stride"])
     st = cfg["stride"]
     hit = [np.zeros((n // st, 2), np.float32) for n in lengths]
@@ -77,6 +80,7 @@ def f3ed(video: str, lengths: list[int], fps: float) -> dict:
             el[k][s:e] += f[:e - s]
             sup[k][s:e] += 1
     os.chdir(here)
+    shutil.rmtree(frames)
     return {"hit": [h / np.maximum(u, 1)[:, None] for h, u in zip(hit, sup)],
             "elements": [x / np.maximum(u, 1)[:, None] for x, u in zip(el, sup)], "stride": st}
 

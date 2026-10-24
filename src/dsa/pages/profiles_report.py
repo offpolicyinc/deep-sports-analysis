@@ -209,8 +209,8 @@ def guest_medians(extra: dict, k: str, n: str) -> dict[str, float]:
 
 
 def label_of(q: str, extra: dict | None = None) -> str:
-    """A pro by surname, one of ours by first name."""
-    return q.split()[0] if q in (extra or {}) else surname(q)
+    """A pro by surname, one of ours as named (by letter)."""
+    return q if q in (extra or {}) else surname(q)
 
 
 def heatmap(project: str, players: list[str], extra: dict | None = None) -> tuple[str, list[str], list[tuple[str, str]]]:
@@ -340,13 +340,22 @@ def guest_projects(project: str) -> list[str]:
 UNSURE: set[str] = set()   # players whose labels can't be trusted (Paul's chosen strokes checked by eye: all him)
 
 
-def guests(project: str) -> dict[str, tuple[str, dict]]:
-    """Each player of the projects compared with this one: (his project, its profiles per kind)."""
+MIN_GUEST = 5   # strokes of a kind before one of ours is shown on it: fewer is a median of noise (others: 1-4 for
+                # some players, from short videos or ones filmed mostly from the far end)
+
+
+def guests(project: str, only: list[str] | None = None, least: int = MIN_GUEST) -> dict[str, tuple[str, dict]]:
+    """Each player of the projects compared with this one (only: of these projects): (his project, its profiles per
+    kind), a kind left out where he has fewer than `least` strokes of it."""
     out = {}
-    for g in guest_projects(project):
+    for g in (g for g in guest_projects(project) if only is None or g in only):
         gres = {k: json.loads((ROOT_PROJECTS / g / "profiles" / f"{k}.json").read_text()) for k in KINDS}
+        for k in KINDS:
+            for q in [q for q, c in gres[k]["strokes"].items() if c < least]:
+                for f in ("box", "median", "mean_pose"):
+                    gres[k][f].pop(q, None)
         for p in PROJECTS[g]["players"]:
-            if any(p in gres[k]["strokes"] for k in KINDS):
+            if any(p in gres[k]["box"] for k in KINDS):
                 out[p] = (g, gres)
     return out
 
@@ -376,7 +385,7 @@ def stroke(project: str, f: dict, i: int) -> dict:
         tt = np.round(np.linspace(GRID[0], GRID[-1], len(p)), 4)
         t = float(tt[phases(normalise(p[None]), tt)[phase][0]])
     out = {"video": m["video"], "frame": m["frame"], "pose": p, "hz": hz,
-           "label": (f"{m['player'].split()[0]}, phone, {m['video'][:4]}" if PROJECTS[project].get("compare_with") else
+           "label": (f"{m['player']}, phone, {m['video'][:4]}" if PROJECTS[project].get("compare_with") else
                      f"{surname(m['player'])}, {m['video'][:4]} {m['video'][5:].split('_')[0].upper()}"),
            "where": DIRECTIONS.get(m["direction"], ""),
            "value_text": f"{SHORT.get(f['name'], f['name'])}: {value(s['f'][i, f['j']], f['unit'])}"}

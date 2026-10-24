@@ -44,7 +44,7 @@ NAMES = ["nose", "l_shoulder", "r_shoulder", "l_elbow", "r_elbow", "l_wrist", "r
          "l_knee", "r_knee", "l_ankle", "r_ankle"]
 MIRROR = [0, 2, 1, 4, 3, 6, 5, 8, 7, 10, 9, 12, 11]                 # left <-> right, for left-handers
 LEFTY = {"Feliciano Lopez", "Fernando Verdasco", "Donald Young", "Adrian Mannarino", "Rafael Nadal", "Ben Shelton",
-         "Denis Shapovalov", "Jack Draper"}
+         "Denis Shapovalov", "Jack Draper", "Player F"}
 
 
 def lefty(player: str) -> bool:
@@ -81,9 +81,18 @@ def hits(spec: str, kind: str) -> tuple[list[dict], np.ndarray, np.ndarray]:
                 "ratio": fj["ratio"], "windows": fj["windows"]}
         fine["smooth"] = int(round(SMOOTH_S * fine["fps"])) // 2 * 2 + 1         # odd, the same span in seconds
     fps, starts, nf, pb = d["fps"], [int(a) for a in d["starts"]], d["pl"]["near_far"], d["pl"]["boxes"]
+    phone = PROJECTS[project].get("phone", False)
+
+    def chosen(h: dict) -> bool:
+        if KINDS[kind]["select"](h):
+            return True
+        if phone and kind in ("forehand", "backhand"):
+            return (h["shot"], h["hand"], h["technique"]) == ("stroke", kind[0] + "h", "lob")
+        return phone and kind == "serve" and (h["shot"], h["technique"]) == ("stroke", "smash")
+
     meta, poses, feet = [], [], []
     for h, player in owners(spec):
-        if player is None or h["side"] != "near" or not KINDS[kind]["select"](h):
+        if player is None or h["side"] != "near" or not chosen(h):
             continue
         f = h["frame"]
         lo = max(a for a in starts[:-1] if a <= f)
@@ -158,14 +167,16 @@ def hits(spec: str, kind: str) -> tuple[list[dict], np.ndarray, np.ndarray]:
             pose[..., 0] = -pose[..., 0]
             foot[:, 1] = -foot[:, 1]
         if kind in ("forehand", "backhand"):         # dsa.gpu.strokes' forehand / backhand only where the contact
-            x = pose[int(np.argmin(abs(G))), :, 0]   # agrees: the hitting wrist right of the hips / the hands left
-            side = x[6] - x[7:9].mean() if kind == "forehand" else x[5:7].mean() - x[7:9].mean()
-            if np.isfinite(side) and (side > 0) != (kind == "forehand"):    # (it often swaps a left-hander's)
-                continue
+            if "by" not in h:                        # (labelled strokes are trusted: a camera off to the side
+                x = pose[int(np.argmin(abs(G))), :, 0]   # puts the contact on either side of his hips)
+                side = x[6] - x[7:9].mean() if kind == "forehand" else x[5:7].mean() - x[7:9].mean()
+                if np.isfinite(side) and (side > 0) != (kind == "forehand"):    # (it often swaps a left-hander's)
+                    continue
             b = pb[f][0]                             # and only a ball that came from the other end: seen above his
             ball = d["ball"][max(lo, f - int(1.2 * fps)):f - int(0.15 * fps)]   # head in the second before, not
             ys = ball[ball[:, 0] > 0, 2]             # a feed (dropped and hit, it never rises above him)
-            if b is not None and len(ys) and (b[1] - ys.min()) / (b[3] - b[1]) < FEED:
+            if (b is not None and len(ys) and (b[1] - ys.min()) / (b[3] - b[1]) < FEED
+                    and v not in PROJECTS[project].get("no_feed_check", []) and "by" not in h):   # labelled: no feeds
                 continue
         meta.append({"video": v, "year": int(v[:4]), "frame": f, "player": player, "his": player == who,
                      "lefty": lefty(player), "direction": h["direction"], "outcome": h["outcome"],
@@ -205,6 +216,11 @@ STANDARD = {"depth": (-1.0, 3.0),            # routine strokes only: metres behi
             "rise": 0.3}                     # forehand / backhand: the wrist this many torso lengths higher 0.3 s
                                              # after contact than 0.15 s before (low to high: no slices, drop shots,
                                              # blocks or stretched defensive swings, which the labels miss)
+PHONE_DEPTH = (-3.0, 3.0)                    # projects with "phone": amateurs rally from up to 3 m inside the baseline
+                                             # (forehand / backhand); and dsa.gpu.strokes on a low phone behind the
+                                             # baseline calls many forehands / backhands "lob" and most serves
+                                             # "stroke, smash", so hits() takes those too (a real smash, near the
+                                             # net, fails the serve's depth)
 
 
 def era(year: int) -> int:
@@ -551,7 +567,8 @@ def prepare(project: str, kind: str, group, yscale: float = 1.0) -> dict:
     std = np.ones(len(f), bool)
     extreme = np.zeros(len(f), bool)
     if kind in ("forehand", "backhand", "serve"):
-        std = (ctx[:, 0] >= STANDARD["depth"][0]) & (ctx[:, 0] <= STANDARD["depth"][1])
+        depth = PHONE_DEPTH if PROJECTS[project].get("phone") and kind != "serve" else STANDARD["depth"]
+        std = (ctx[:, 0] >= depth[0]) & (ctx[:, 0] <= depth[1])
         if kind != "serve":
             rise = xy[:, int(np.argmin(abs(grid - 0.3))), 6, 1] - xy[:, int(np.argmin(abs(grid + 0.15))), 6, 1]
             std &= rise >= STANDARD["rise"]
