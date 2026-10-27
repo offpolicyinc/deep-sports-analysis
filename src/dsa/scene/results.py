@@ -40,7 +40,7 @@ def load(spec: str) -> dict:
     starts = np.cumsum([0] + [b - a for a, b in json.loads(kj.read_text())["pieces"]]) if kj.exists() else np.array([0, total])
     return {"src": src, "video": str(src / ("kept.mp4" if kj.exists() else "source.mp4")),
             "boxes": np.split(z["boxes"], cut), "kps": np.split(z["kp"], cut), "ball": z["ball"],
-            "court": court_tv(z["court"], total, starts[1:-1])[0] if "court" in z else phone_saved(src / "court", total),
+            "court": court_tv(z["court"], total, starts[1:-1])[0] if "court" in z else phone_saved(src / "court", total)[0],
             "size": (int(z["width"]), int(z["height"])), "pl": pl, "fps": pl["fps"], "total": total,
             "starts": starts, "hits": json.loads(sj.read_text())["hits"] if sj.exists() else [],
             "name": {k: (names.get(str(k + 1)) or f"Player {k + 1}").split()[-1] for k in (0, 1)}}

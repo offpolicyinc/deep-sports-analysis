@@ -4,6 +4,7 @@ from __future__ import annotations
 import queue
 import subprocess
 import threading
+from collections.abc import Iterator
 from pathlib import Path
 
 import numpy as np
@@ -27,6 +28,26 @@ def frame_at(video: str, i: int) -> np.ndarray:
     ok, bgr = cap.read()
     cap.release()
     return bgr
+
+
+def frames_at(video: str, wanted) -> Iterator[tuple[int, np.ndarray]]:
+    """Yield (i, BGR frame) for the frames numbered in `wanted`, in order: the others are decoded but never converted
+    to BGR, half the time of reading every frame (frames)."""
+    import cv2
+
+    wanted, cap = sorted(set(wanted)), cv2.VideoCapture(str(video))
+    try:
+        i = 0
+        for w in wanted:
+            while i < w and cap.grab():
+                i += 1
+            ok, bgr = cap.read() if i == w else (False, None)
+            if not ok:
+                return
+            yield w, bgr
+            i += 1
+    finally:
+        cap.release()
 
 
 def frames(video: str, limit: int = 0, start: int = 0):

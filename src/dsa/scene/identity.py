@@ -65,10 +65,11 @@ def chi2(a: np.ndarray, b: np.ndarray) -> float:
 
 
 def split(picks: list[list], per_frame: list[np.ndarray], ids: list[np.ndarray], person_of: dict[int, int],
-          kp: list[np.ndarray], frames, tv: bool = False) -> dict:
-    """picks[i]: the players' person ids in frame i (None for an empty side). `frames` yields the clip's
-    BGR frames in order. Returns {"player": {person: 0 or 1}, "margin": {person: float}, "looks": {...},
-    "frames": per frame [near, far] as 0 / 1 / None, "centres": the two players' looks}."""
+          kp: list[np.ndarray], read, tv: bool = False) -> dict:
+    """picks[i]: the players' person ids in frame i (None for an empty side). `read(wanted)` yields (i, BGR frame)
+    for the frame numbers it's given (dsa.video.frames_at). Returns {"player": {person: 0 or 1}, "margin":
+    {person: float}, "looks": {...}, "frames": per frame [near, far] as 0 / 1 / None, "centres": the two players'
+    looks}."""
     seen: dict[int, list[int]] = defaultdict(list)
     together: dict[tuple[int, int], int] = defaultdict(int)
     for i, pk in enumerate(picks):
@@ -89,15 +90,13 @@ def split(picks: list[list], per_frame: list[np.ndarray], ids: list[np.ndarray],
         for i in np.unique(np.linspace(0, len(fs) - 1, min(SAMPLES, len(fs))).astype(int)):
             want[fs[i]].append(p)
     got: dict[int, list[np.ndarray]] = defaultdict(list)
-    for i, bgr in enumerate(frames):
-        for p in want.get(i, []):
+    for i, bgr in read(want):
+        for p in want[i]:
             j = [j for j in np.flatnonzero(ids[i] >= 0) if person_of[int(ids[i][j])] == p]
             if j:
                 d = describe(bgr, kp[i][j[0]].astype(np.float32))
                 if d is not None:
                     got[p].append(d)
-        if i >= max(want, default=0):
-            break
     look = {p: np.mean(v, axis=0) for p, v in got.items()}
     weight = {p: len(seen[p]) for p in look}
     if len(look) < 2:

@@ -11,17 +11,21 @@
           A failed check keeps the last court for up to COURT_HOLD frames (a player across a line), then
           drops it (a cut to a close-up).
 
+    python -m dsa.scene.court <project>/<video>        phone: marks <video>/court/court.npz
+
 Reference court (TennisCourtDetector's court_reference.py): the 14 points in REF units, METRE per metre,
 near baseline at the bottom. `homography` maps image points onto it; `in_area` is where players play.
 """
 from __future__ import annotations
 
+import argparse
 import subprocess
 from pathlib import Path
 
 import cv2
 import numpy as np
 
+from dsa.paths import video_dir
 from dsa.video import frame_at, info
 
 POINTS = [
@@ -203,9 +207,13 @@ def ask_opus(video: str, frame: int, work: Path, what: str = "tennis video filme
     return snap(bgr, consistent(raw, w))
 
 
-def phone(video: str, fps: float, n: int, work: Path) -> tuple[list[np.ndarray | None], list[str]]:
-    """The court of every frame, and a line per camera position saying how it was found: Opus marks it once, and
-    it follows the camera (see the module's docstring)."""
+def phone(video: str, work: Path) -> None:
+    """Marks the court of every frame into <work>/court.npz (see the module's docstring): per camera position its
+    first and last frame, its court and how it was found. Needs only the video, so it can run while the GPU step
+    does (dsa.scene.run --court-marked); phone_saved reads it back."""
+    cap = cv2.VideoCapture(str(video))
+    fps, n = cap.get(cv2.CAP_PROP_FPS), int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+    cap.release()
     first, step = min(round(OPUS_IN_S * fps), n - 1), round(WINDOW_S * fps)
     scale = info(video)[1] / ALIGN_W
     segs: list[list] = []                                       # [first frame, court, how]
@@ -222,23 +230,21 @@ def phone(video: str, fps: float, n: int, work: Path) -> tuple[list[np.ndarray |
         if np.median(np.hypot(*(moved - segs[-1][1][:, :2]).T)) > STILL_PX:
             segs.append([f, moved, f"camera moved {np.median(np.hypot(*(moved - court[:, :2]).T)):.0f} px, followed"])
     ends = [s[0] for s in segs[1:]] + [n]
-    out: list[np.ndarray | None] = [None] * n
-    for (s0, pts, _), s1 in zip(segs, ends):
-        out[s0:s1] = [pts] * (s1 - s0)
     np.savez(work / "court.npz", start=np.array([s[0] for s in segs]), end=np.array(ends),
-             points=np.array([s[1][:, :2] for s in segs], float))  # read back by dsa.scene.results
-    return out, [f"{s[0] / fps:.0f}-{e / fps:.0f} s: {s[2]}" for s, e in zip(segs, ends)]
+             points=np.array([s[1][:, :2] for s in segs], float),
+             log=np.array([f"{s[0] / fps:.0f}-{e / fps:.0f} s: {s[2]}" for s, e in zip(segs, ends)]))
 
 
-def phone_saved(work: Path, n: int) -> list[np.ndarray | None] | None:
-    """The court of every frame as dsa.scene.court.phone found it (<video>/court/court.npz), or None."""
+def phone_saved(work: Path, n: int) -> tuple[list[np.ndarray | None] | None, list[str]]:
+    """The court of each of n frames as `phone` marked it (<work>/court.npz), the last camera position running to
+    the end (the header's frame count can be a little off), and a line per position; (None, []) when unmarked."""
     f = work / "court.npz"
     if not f.exists():
-        return None
+        return None, []
     z, out = np.load(f), [None] * n
-    for a, b, p in zip(z["start"], z["end"], z["points"]):
+    for a, b, p in zip(z["start"], [*z["end"][:-1], n], z["points"]):
         out[int(a):int(b)] = [p] * (int(b) - int(a))
-    return out
+    return out, [str(x) for x in z["log"]] if "log" in z else []
 
 
 # --- tv -----------------------------------------------------------------------------------------------------
@@ -298,3 +304,11 @@ def tv(checks: np.ndarray, n: int, breaks=()) -> tuple[list[np.ndarray | None], 
             for i, w in zip(range(a + 1, b), t):
                 out[i] = (1 - w) * checks[a] + w * checks[b]
     return out, [f"court in {sum(c is not None for c in out) / max(n, 1):.0%} of frames"]
+
+
+if __name__ == "__main__":
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("video", help="<project>/<video>")
+    src = video_dir(ap.parse_args().video)
+    phone(str(src / "source.mp4"), src / "court")
+    print("\n".join(phone_saved(src / "court", 0)[1]))

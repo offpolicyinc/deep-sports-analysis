@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from functools import partial
 from pathlib import Path
 
 import numpy as np
@@ -27,24 +28,26 @@ import numpy as np
 from dsa.paths import video_dir
 from dsa.scene import court as C
 from dsa.scene import events, identity, players, tracks, who
-from dsa.video import frames
+from dsa.video import frames_at
 
 
-def analyse(video: str, npz: str | Path, work: Path, tv: bool = False) -> dict:
+def analyse(video: str, npz: str | Path, work: Path, tv: bool = False, court_marked: bool = False) -> dict:
     z = np.load(npz)
     fps, W, H = float(z["fps"]), int(z["width"]), int(z["height"])
     cut = np.cumsum(z["n"])[:-1]
     boxes, ids, kp = np.split(z["boxes"], cut), np.split(z["track"], cut), np.split(z["kp"], cut)
     n = len(boxes)
     pp = tracks.people(boxes, ids, fps)
-    court, log = C.tv(z["court"], n) if tv else C.phone(video, fps, n, work / "court")
+    if not (tv or court_marked):
+        C.phone(video, work / "court")
+    court, log = C.tv(z["court"], n) if tv else C.phone_saved(work / "court", n)
     sides, hits = players.pick(pp["people"], boxes, ids, pp["person_of"], court, z["ball"], kp, H if tv else None)
     if tv:
-        look = who.looks(sides, boxes, ids, pp["person_of"], kp, frames(video, n))
+        look = who.looks(sides, boxes, ids, pp["person_of"], kp, partial(frames_at, video))
         ident = {"player": {}, "margin": {}, "frames": [[None, None]] * n}
     else:
         look = {}
-        ident = identity.split(sides, boxes, ids, pp["person_of"], kp, frames(video, n), tv)
+        ident = identity.split(sides, boxes, ids, pp["person_of"], kp, partial(frames_at, video), tv)
     return {"looks": look, "fps": fps, "size": (W, H), "boxes": boxes, "ids": ids, "kp": kp, "ball": z["ball"], "court": court,
             "court_log": log, "people": pp["people"], "person_of": pp["person_of"], "sides": sides, "hits": hits,
             "player": ident["player"], "margin": ident["margin"], "labels": ident["frames"], "centres": ident.get("centres"), "gpu_seconds": json.loads(str(z["seconds"])),
@@ -68,13 +71,14 @@ def main() -> None:
     ap.add_argument("video", help="<project>/<video>")
     ap.add_argument("--tv", action="store_true", help="TV footage without kept.json (court from the GPU step)")
     ap.add_argument("--test", action="store_true", help="the test run's output, in <video>/test/")
+    ap.add_argument("--court-marked", action="store_true", help="phone: the court is marked already (dsa.scene.court)")
     a = ap.parse_args()
 
     src = video_dir(a.video)
     d = src / "test" if a.test else src
     kept = (src / "kept.json").exists()
     video = str(src / ("kept.mp4" if kept else "source.mp4"))
-    r = analyse(video, d / "raw.npz", src, a.tv or kept)
+    r = analyse(video, d / "raw.npz", src, a.tv or kept, a.court_marked)
     print(a.video, r["gpu_seconds"])
 
     def box(i, p):

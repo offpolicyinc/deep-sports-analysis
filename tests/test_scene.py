@@ -108,7 +108,7 @@ def test_identity_splits_by_colour():
     per_frame = [np.zeros((2, 5), np.float32)] * 10 + [np.zeros((1, 5), np.float32)] * 10
     ids = [np.array([1, 2])] * 10 + [np.array([3])] * 10
     kps = [np.stack([person(0), person(300)])] * 10 + [np.stack([person(300)])] * 10
-    r = identity.split(picks, per_frame, ids, {1: 1, 2: 2, 3: 3}, kps, iter(frames))
+    r = identity.split(picks, per_frame, ids, {1: 1, 2: 2, 3: 3}, kps, lambda want: ((i, frames[i]) for i in sorted(want)))
     assert r["player"][1] != r["player"][2] and r["player"][3] == r["player"][1]
 
 
@@ -124,7 +124,7 @@ def test_identity_returns_each_players_look():
     img = np.zeros((h, w, 3), np.uint8)
     img[:, :300], img[:, 300:] = (0, 0, 220), (220, 0, 0)
     r = identity.split([[1, 2]] * 5, [np.zeros((2, 5), np.float32)] * 5, [np.array([1, 2])] * 5, {1: 1, 2: 2},
-                       [np.stack(k)] * 5, iter([img] * 5))
+                       [np.stack(k)] * 5, lambda want: ((i, img) for i in sorted(want)))
     red = identity.describe(img, k[0])
     assert identity.chi2(r["centres"][r["player"][1]], red) < 1e-9
 
@@ -199,7 +199,7 @@ def test_far_player_is_the_other_one():
     per_frame = [np.zeros((2, 5), np.float32)] * 20
     ids = [np.array([1, 3])] * 10 + [np.array([2, 3])] * 10
     kps = [np.stack([person(0), person(300)])] * 20
-    r = identity.split(picks, per_frame, ids, {1: 1, 2: 2, 3: 3}, kps, iter(frames), tv=True)
+    r = identity.split(picks, per_frame, ids, {1: 1, 2: 2, 3: 3}, kps, lambda want: ((i, frames[i]) for i in sorted(want)), tv=True)
     a, b = r["frames"][0], r["frames"][15]
     assert a[0] != b[0] and a[1] == 1 - a[0] and b[1] == 1 - b[0]
 

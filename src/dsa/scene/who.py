@@ -128,10 +128,11 @@ def describe(bgr: np.ndarray, kp: np.ndarray, box: np.ndarray) -> np.ndarray | N
 
 
 def looks(picks: list[list], per_frame: list[np.ndarray], ids: list[np.ndarray], person_of: dict[int, int],
-          kp: list[np.ndarray], frames) -> list[tuple[int, int, int, int, np.ndarray]]:
+          kp: list[np.ndarray], read) -> list[tuple[int, int, int, int, np.ndarray]]:
     """[(near person id, first frame, last frame, frames picked, median look (describe))] per CHUNK of
     an id's near-end frames (one id now and then runs across both players: at a changeover without a cut), for
-    chunks of at least MIN_FRAMES, described at up to SAMPLES moments."""
+    chunks of at least MIN_FRAMES, described at up to SAMPLES moments. `read(wanted)` yields (i, BGR frame) for the frame
+    numbers it's given (dsa.video.frames_at)."""
     seen: dict[int, list[int]] = defaultdict(list)
     for i, pk in enumerate(picks):
         if pk[0] is not None:
@@ -152,11 +153,8 @@ def looks(picks: list[list], per_frame: list[np.ndarray], ids: list[np.ndarray],
         for i in np.unique(np.linspace(0, len(fs) - 1, min(SAMPLES, len(fs))).astype(int)):
             want[fs[i]].append(c)
     got: dict[int, list[np.ndarray]] = defaultdict(list)
-    last = max(want, default=-1)
-    for i, bgr in enumerate(frames):
-        if i > last:
-            break
-        for c in want.get(i, []):
+    for i, bgr in read(want):
+        for c in want[i]:
             p = chunks[c][0]
             j = [j for j in np.flatnonzero(ids[i] >= 0) if person_of[int(ids[i][j])] == p]
             if j:
