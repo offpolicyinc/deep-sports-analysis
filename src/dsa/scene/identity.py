@@ -14,15 +14,20 @@ split into two people:
              is the other one. Far-end colour (a small player, the court bleeding in, one id sometimes
              running across both players) decides only when nobody is at the near end. Phone: each id's
              player from the split above.
+  line_up    the pieces of one session, each split on its own, renumbered so Player 1 is the same person in all:
+             each later piece takes whichever numbering puts its players' looks nearer the first piece's.
 
 margin = how much nearer the id is to its own player than to the other (0 = a coin toss).
 """
 from __future__ import annotations
 
+import json
 from collections import defaultdict
 
 import cv2
 import numpy as np
+
+from dsa.paths import video_dir
 
 SAMPLES = 40
 MIN_SCORE = 0.3
@@ -63,7 +68,7 @@ def split(picks: list[list], per_frame: list[np.ndarray], ids: list[np.ndarray],
           kp: list[np.ndarray], frames, tv: bool = False) -> dict:
     """picks[i]: the players' person ids in frame i (None for an empty side). `frames` yields the clip's
     BGR frames in order. Returns {"player": {person: 0 or 1}, "margin": {person: float}, "looks": {...},
-    "frames": per frame [near, far] as 0 / 1 / None}."""
+    "frames": per frame [near, far] as 0 / 1 / None, "centres": the two players' looks}."""
     seen: dict[int, list[int]] = defaultdict(list)
     together: dict[tuple[int, int], int] = defaultdict(int)
     for i, pk in enumerate(picks):
@@ -140,7 +145,7 @@ def split(picks: list[list], per_frame: list[np.ndarray], ids: list[np.ndarray],
         far = (1 - k if k is not None else player.get(f)) if tv else player.get(f)
         per_frame.append([k, None if f is None else far])
     margin = {p: chi2(look[p], centre[1 - player[p]]) - chi2(look[p], centre[player[p]]) for p in player}
-    return {"player": player, "margin": margin, "looks": look, "frames": per_frame}
+    return {"player": player, "margin": margin, "looks": look, "frames": per_frame, "centres": centre}
 
 
 def _two(ids: list[int], look: dict, weight: dict) -> dict[int, int]:
@@ -158,3 +163,26 @@ def _two(ids: list[int], look: dict, weight: dict) -> dict[int, int]:
             if m:
                 c[k] = np.average([look[p] for p in m], axis=0, weights=[weight[p] for p in m])
     return lab
+
+
+def line_up(specs: list[str]) -> list[str]:
+    """The later videos of one session (dsa.scene.run's players.json each) renumbered to match the first: Player 1
+    and 2 swapped where the crossed pairing of the two players' looks is the nearer. A video without both looks
+    (one player only) is left as it is. Returns the videos swapped."""
+    def load(spec: str) -> dict:
+        return json.loads((video_dir(spec) / "players.json").read_text())
+
+    first, other, swapped = load(specs[0]).get("looks"), {1: 2, 2: 1}, []
+    for spec in specs[1:]:
+        pl = load(spec)
+        if first is None or pl.get("looks") is None:
+            continue
+        (a1, a2), (b1, b2) = np.array(first), np.array(pl["looks"])
+        if chi2(a1, b1) + chi2(a2, b2) <= chi2(a1, b2) + chi2(a2, b1):
+            continue
+        pl["near_far"] = [[other.get(k) for k in ends] for ends in pl["near_far"]]
+        pl["contacts"] = [[t, other.get(k)] for t, k in pl["contacts"]]
+        pl["looks"] = pl["looks"][::-1]
+        (video_dir(spec) / "players.json").write_text(json.dumps(pl))
+        swapped.append(spec)
+    return swapped

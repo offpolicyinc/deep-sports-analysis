@@ -112,6 +112,46 @@ def test_identity_splits_by_colour():
     assert r["player"][1] != r["player"][2] and r["player"][3] == r["player"][1]
 
 
+def test_identity_returns_each_players_look():
+    import cv2
+
+    h, w = 400, 600
+    kp = np.full((65, 3), np.nan, np.float32)
+    body = {5: (100, 100), 6: (200, 100), 11: (110, 250), 12: (190, 250), 13: (115, 350), 14: (185, 350)}
+    k = [kp.copy(), kp.copy()]
+    for i, (x, y) in body.items():
+        k[0][i], k[1][i] = (x, y, 0.9), (x + 300, y, 0.9)
+    img = np.zeros((h, w, 3), np.uint8)
+    img[:, :300], img[:, 300:] = (0, 0, 220), (220, 0, 0)
+    r = identity.split([[1, 2]] * 5, [np.zeros((2, 5), np.float32)] * 5, [np.array([1, 2])] * 5, {1: 1, 2: 2},
+                       [np.stack(k)] * 5, iter([img] * 5))
+    red = identity.describe(img, k[0])
+    assert identity.chi2(r["centres"][r["player"][1]], red) < 1e-9
+
+
+def test_line_up_renumbers_later_pieces_to_match_the_first(tmp_path, monkeypatch):
+    import json
+
+    red, blue = np.eye(4)[0], np.eye(4)[1]                  # two players' looks
+    def piece(name, looks, p1_near):
+        (tmp_path / name).mkdir()
+        ends = [1, 2] if p1_near else [2, 1]
+        (tmp_path / name / "players.json").write_text(json.dumps({
+            "fps": 30.0, "near_far": [ends, [ends[0], None]], "boxes": [[None, None]] * 2,
+            "contacts": [[0, 1], [1, None]], "looks": None if looks is None else [x.tolist() for x in looks]}))
+    monkeypatch.setattr(identity, "video_dir", lambda spec: tmp_path / spec.split("/")[1])
+    piece("a", [red, blue], True)
+    piece("b", [red, blue], False)          # numbered as the first; ends changed
+    piece("c", [blue, red], True)           # numbered the other way
+    piece("d", None, True)                  # one player only: no looks
+    specs = [f"p/{v}" for v in "abcd"]
+    assert identity.line_up(specs) == ["p/c"]
+    c = json.loads((tmp_path / "c" / "players.json").read_text())
+    assert c["near_far"] == [[2, 1], [2, None]] and c["contacts"] == [[0, 2], [1, None]]
+    assert c["looks"] == [red.tolist(), blue.tolist()]
+    assert identity.line_up(specs) == []    # a rerun leaves it
+
+
 def test_names_crops_prefer_the_near_end():
     from dsa.scene.names import CROPS, moments
 

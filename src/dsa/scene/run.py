@@ -10,7 +10,7 @@ raw.npz (dsa.gpu.process) to who played, where, and when they hit the ball. TV i
   contacts   ball contacts (dsa.scene.events)
 
 Writes <video>/players.json (per frame: the player at the near and far end, 1 / 2 / null, and their boxes;
-contacts as [frame, player]); TV: <video>/picks.json (the same with person ids) and looks.npz, for dsa.scene.who. --test works on the test run instead (<video>/test/). The overlay video comes
+contacts as [frame, player]; phone: each player's look, for dsa.scene.identity.line_up); TV: <video>/picks.json (the same with person ids) and looks.npz, for dsa.scene.who. --test works on the test run instead (<video>/test/). The overlay video comes
 after step 4 (dsa.pages.render).
 
     python -m dsa.scene.run tests/own_drew
@@ -47,7 +47,7 @@ def analyse(video: str, npz: str | Path, work: Path, tv: bool = False) -> dict:
         ident = identity.split(sides, boxes, ids, pp["person_of"], kp, frames(video, n), tv)
     return {"looks": look, "fps": fps, "size": (W, H), "boxes": boxes, "ids": ids, "kp": kp, "ball": z["ball"], "court": court,
             "court_log": log, "people": pp["people"], "person_of": pp["person_of"], "sides": sides, "hits": hits,
-            "player": ident["player"], "margin": ident["margin"], "labels": ident["frames"], "gpu_seconds": json.loads(str(z["seconds"])),
+            "player": ident["player"], "margin": ident["margin"], "labels": ident["frames"], "centres": ident.get("centres"), "gpu_seconds": json.loads(str(z["seconds"])),
             "contacts": events.contacts(z["ball"], boxes, ids, pp["person_of"], kp)}
 
 
@@ -106,7 +106,8 @@ def main() -> None:
     (d / "players.json").write_text(json.dumps({
         "fps": r["fps"], "near_far": per_frame,
         "boxes": boxes,
-        "contacts": [[t, label(t, p)] for t, p in r["contacts"]]}))
+        "contacts": [[t, label(t, p)] for t, p in r["contacts"]],
+        "looks": None if r["centres"] is None else [np.round(c, 5).tolist() for c in r["centres"]]}))
 
 
 if __name__ == "__main__":
