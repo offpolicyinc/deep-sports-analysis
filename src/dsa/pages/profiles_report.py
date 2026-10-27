@@ -213,12 +213,10 @@ def label_of(q: str, extra: dict | None = None) -> str:
     return q if q in (extra or {}) else surname(q)
 
 
-def heatmap(project: str, players: list[str], extra: dict | None = None,
-            across: bool = False) -> tuple[str, list[str], list[tuple[str, str]]]:
-    """Each player's median against the others' on every measure shown (red higher, blue lower), grouped by stroke:
-    measures down and players across, or (across) players down and measures across. Players along the squares' main
-    pattern (first singular vector, all strokes together), so alike players sit together, and our own (extra) last;
-    measures within a stroke phase by phase (PHASES)."""
+def heatmap(project: str, players: list[str], extra: dict | None = None) -> tuple[str, list[str], list[tuple[str, str]]]:
+    """Measures down (grouped by stroke), players across: colour his median against the others' (red higher, blue
+    lower). Players along the squares' main pattern (first singular vector, all strokes together), so alike players
+    sit together, and our own (extra) last; measures within a stroke phase by phase (PHASES)."""
     res, _ = load(project)
     extra = extra or {}
     zs = heat_z(project, res, players, extra)
@@ -227,17 +225,6 @@ def heatmap(project: str, players: list[str], extra: dict | None = None,
                              full_matrices=False)
     n_pros = len(players)
     players = [players[i] for i in np.argsort(vt[0])] + list(extra)
-    order = []
-    for k in KINDS:
-        names = kept(project, k)
-        gs = [[n for n in g if n in names] for g in PHASES.get(k, [])]
-        order += [(k, n) for g in gs for n in g] + [(k, n) for n in names if not any(n in g for g in gs)]
-    draw = heat_across if across else heat_down
-    return draw(zs, players, n_pros, order, extra), players, order
-
-
-def heat_down(zs: dict, players: list[str], n_pros: int, order: list[tuple[str, str]], extra: dict) -> str:
-    """The heatmap with measures down, players across."""
     # square cells, players' names written upward over them and, over those, which are pros and which ours; each
     # row's trait to the right of its squares (the page puts the clips on the left)
     cw, rh, left, gap = 22, 22, 4, 26
@@ -246,7 +233,15 @@ def heat_down(zs: dict, players: list[str], n_pros: int, order: list[tuple[str, 
 
     def cx(c: int) -> float:
         return left + c * cw + (split if c >= n_pros else 0)
-    grid_h = rh * len(order) + gap * (len(KINDS) - 1)
+    groups = {}
+    for k in KINDS:
+        names = kept(project, k)
+        gs = [[n for n in g if n in names] for g in PHASES.get(k, [])]
+        rest = [n for n in names if not any(n in g for g in gs)]
+        groups[k] = [g for g in gs + [rest] if g]
+    n_rows = sum(len(kept(project, k)) for k in KINDS)
+    order = []
+    grid_h = rh * n_rows + gap * (len(KINDS) - 1)
     lx = cx(len(players)) + 10                        # the traits' names start here
     w, h = lx + 140, top + grid_h + LEGEND_H + 8
     out = [f'<svg class="heat" viewBox="0 0 {w} {h}" width="{w}" height="{h}" role="img">']
@@ -258,11 +253,23 @@ def heat_down(zs: dict, players: list[str], n_pros: int, order: list[tuple[str, 
     for k in KINDS:
         y += gap
         out.append(f'<text x="{lx}" y="{y - 6}" class="kindlab">{k.capitalize()}</text>')
-        for n in (n for kk, n in order if kk == k):
+        for n in (n for ns in groups[k] for n in ns):
+            order.append((k, n))
             out.append(f'<g class="hr" data-k="{k}" data-n="{n}"><rect class="band" x="0" y="{y}" width="{w}" '
                        f'height="{rh}"/><text x="{lx}" y="{y + rh / 2 + 3.5:.1f}" class="hrow" '
                        f'text-anchor="start">{SHORT.get(n, n)}</text>')
-            out += [square(zs[k, n], k, n, p, cx(c), y, cw, rh, extra) for c, p in enumerate(players)]
+            for c, p in enumerate(players):
+                if p not in zs[k, n]:
+                    if p in extra:         # not measured on our phone footage: a clear square, so the gap reads as one
+                        out.append(f'<rect class="na" x="{cx(c) + 1.5}" y="{y + 1.5}" width="{cw - 3}" height="{rh - 3}" '
+                                   f'rx="2"><title>{label_of(p, extra)}, {k} {SHORT.get(n, n)}: not measured on our phone '
+                                   f'footage</title></rect>')
+                    continue
+                z = zs[k, n][p]
+                a = min(abs(z) / 1.5, 1)
+                col = f"rgba(220,38,38,{a:.2f})" if z > 0 else f"rgba(37,99,235,{a:.2f})"
+                out.append(f'<rect class="cell" data-p="{label_of(p, extra)}" x="{cx(c) + 1}" y="{y + 1}" '
+                           f'width="{cw - 2}" height="{rh - 2}" rx="2" fill="{col}"><title>{label_of(p, extra)}, {k} {SHORT.get(n, n)}: {z:+.1f} SD of a player\'s strokes</title></rect>')
             out.append("</g>")
             y += rh
     if extra:                          # the divider last, over the highlighted row's band; then whose columns are whose
@@ -275,65 +282,7 @@ def heat_down(zs: dict, players: list[str], n_pros: int, order: list[tuple[str, 
             out.append(f'<path class="bracket" d="M{x1} {yb + 6}V{yb}H{x2}V{yb + 6}"/>'
                        f'<text x="{tx:.0f}" y="{yb - 8}" class="grouplab" text-anchor="{anchor}">{name}</text>')
     out.append(legend(left + (cx(len(players)) - left - (9 * cw + cw - 2)) / 2, y + 18, cw, bool(extra)))   # centred under the squares
-    return "".join(out) + "</svg>"
-
-
-def heat_across(zs: dict, players: list[str], n_pros: int, order: list[tuple[str, str]], extra: dict) -> str:
-    """The heatmap with players down, measures across: each stroke's name over a bracket, its measures' names
-    slanted up from their columns, the players' names to the left and, if ours are there, the pros and ours each
-    named, a rule between them."""
-    cw, rh, gap, slant = 22, 14, 16, 100               # cells wider than tall; room over the columns for a slanted name
-    lw = 88                                            # the players' names, right-aligned to here
-    top = 40 + slant
-    split = 18 if extra else 0                         # a gutter between the pros and our own players, a rule in it
-
-    def cx(i: int) -> float:
-        return lw + i * cw + gap * KINDS.index(order[i][0])
-
-    def ry(r: int) -> float:
-        return top + r * rh + (split if r >= n_pros else 0)
-    right, grid_h = cx(len(order) - 1) + cw, ry(len(players)) - top
-    w, h = right + slant, top + grid_h + LEGEND_H + 8
-    out = [f'<svg class="heat" viewBox="0 0 {w} {h}" width="{w}" height="{h}" role="img">']
-    for r, p in enumerate(players):
-        out.append(f'<text x="{lw - 8}" y="{ry(r) + rh / 2 + 4:.0f}" class="tick" text-anchor="end" '
-                   f'data-p="{label_of(p, extra)}">{label_of(p, extra)}</text>')
-    for k in KINDS:                    # each stroke's name over a bracket opening down onto its measures' names
-        ix = [i for i, (kk, _) in enumerate(order) if kk == k]
-        x1, x2 = cx(ix[0]) + 1, cx(ix[-1]) + cw - 1
-        out.append(f'<path class="bracket" d="M{x1} 34V28H{x2}V34"/>'
-                   f'<text x="{(x1 + x2) / 2:.0f}" y="18" class="kindlab" text-anchor="middle">{k.capitalize()}</text>')
-    for i, (k, n) in enumerate(order):
-        x = cx(i)
-        out.append(f'<g class="hr" data-k="{k}" data-n="{n}"><rect class="band" x="{x}" y="{top - 4}" width="{cw}" '
-                   f'height="{grid_h + 4}"/><text transform="translate({x + cw / 2 - 2:.0f},{top - 6}) rotate(-45)" '
-                   f'class="hrow">{SHORT.get(n, n)}</text>')
-        out += [square(zs[k, n], k, n, p, x, ry(r), cw, rh, extra) for r, p in enumerate(players)]
-        out.append("</g>")
-    if extra:                          # whose rows are whose: the pros named over theirs, ours on the rule over ours
-        yd = ry(n_pros) - split / 2
-        out.append(f'<text x="0" y="{top - 6}" class="grouplab">Pros</text>'
-                   f'<text x="0" y="{yd + 4}" class="grouplab">Amateurs</text>'
-                   f'<line class="divider" x1="{lw}" x2="{right}" y1="{yd}" y2="{yd}"/>')
-    out.append(legend(lw + (right - lw - (9 * cw + cw - 2)) / 2, top + grid_h + 18, cw, bool(extra)))   # centred
-    return "".join(out) + "</svg>"
-
-
-def tint(z: float) -> str:
-    """A z score's colour: red above the others, blue below, full at 1.5 either way."""
-    a = min(abs(z) / 1.5, 1)
-    return f"rgba(220,38,38,{a:.2f})" if z > 0 else f"rgba(37,99,235,{a:.2f})"
-
-
-def square(z: dict, k: str, n: str, p: str, x: float, y: float, w: float, h: float, extra: dict) -> str:
-    """Player p's square on measure n of kind k in the cell at (x, y): its colour, a clear one where ours weren't
-    measured, nothing for a pro without it."""
-    who = label_of(p, extra)
-    if p not in z:                     # not measured on our phone footage: a clear square, so the gap reads as one
-        return (f'<rect class="na" x="{x + 1.5}" y="{y + 1.5}" width="{w - 3}" height="{h - 3}" rx="2"><title>{who}, '
-                f'{k} {SHORT.get(n, n)}: not measured on our phone footage</title></rect>' if p in extra else "")
-    return (f'<rect class="cell" data-p="{who}" x="{x + 1}" y="{y + 1}" width="{w - 2}" height="{h - 2}" rx="2" '
-            f'fill="{tint(z[p])}"><title>{who}, {k} {SHORT.get(n, n)}: {z[p]:+.1f} SD of a player\'s strokes</title></rect>')
+    return "".join(out) + "</svg>", players, order
 
 
 LEGEND_H = 136
@@ -345,9 +294,11 @@ def legend(x: float, y: float, cw: float, na: bool = False) -> str:
     zs = [-1.5, -1, -0.5, 0, 0.5, 1, 1.5]
     out = []
     for i, z in enumerate(zs):
+        a = min(abs(z) / 1.5, 1)
+        col = f"rgba(220,38,38,{a:.2f})" if z > 0 else f"rgba(37,99,235,{a:.2f})"
         lab = {-1.5: "≤ −1.5", -1: "−1", -0.5: "−0.5", 0: "0", 0.5: "+0.5", 1: "+1", 1.5: "≥ +1.5"}[z]
         cx = x + i * cw * 1.5
-        out.append(f'<rect x="{cx:.0f}" y="{y}" width="{cw - 2}" height="{cw - 2}" rx="2" fill="{tint(z)}" '
+        out.append(f'<rect x="{cx:.0f}" y="{y}" width="{cw - 2}" height="{cw - 2}" rx="2" fill="{col}" '
                    f'stroke="var(--line)" stroke-width="{1 if z == 0 else 0}"/>'
                    f'<text x="{cx + (cw - 2) / 2:.0f}" y="{y + cw + 12}" class="tick" text-anchor="middle">{lab}</text>')
     mid = x + 3 * cw * 1.5 + (cw - 2) / 2                  # under the 0 square: the scale's name below its numbers
