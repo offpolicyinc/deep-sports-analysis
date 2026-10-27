@@ -35,7 +35,8 @@ CHUNK = 64                      # frames decoded before their ball inputs and co
 def process(video: str, out: str, tv: bool = False, device: str = "cuda", pose_device: str = "cuda",
             limit: int = 0, batch: int = BATCH, on_pass1=None, breaks=(), near_only: bool = False,
             court_every: int = 0, models: dict | None = None, ball: bool = True,
-            pose_frames: set[int] | Callable[[], set[int]] | None = None, pose_people: int = 0) -> dict:
+            pose_frames: set[int] | Callable[[], set[int]] | None = None, pose_people: int = 0,
+            on_frames: Callable[[int, list[np.ndarray]], None] | None = None) -> dict:
     """TV options (a project's "gpu" in dsa.ingest.projects): near_only poses only people at the near end (a quarter of
     the skeletons, and all the stroke and movement analysis uses); court_every checks the court that often (frames;
     default COURT_EVERY). models: already loaded ones (load_models), shared by runs side by side on one GPU.
@@ -43,7 +44,9 @@ def process(video: str, out: str, tv: bool = False, device: str = "cuda", pose_d
     ball is then all not-found); pose_frames poses only those frames (e.g. around each stroke), not every one (or is a
     function giving them, called once pass 1 is done, so the strokes can be found alongside pass 1), and
     pose_people also up to that many frames of every moving person, spread over their time (dsa.scene.identity
-    tells the two players apart from up to SAMPLES of each)."""
+    tells the two players apart from up to SAMPLES of each). on_frames(first, frames) sees every chunk of pass 1's
+    decoded frames, on a CPU thread while the GPU works, so another model can use the same decoding (not called
+    when pass 1 is reused from raw.pass1.npz)."""
     import cv2
 
     from dsa.gpu.models import KP, Pose
@@ -132,6 +135,8 @@ def process(video: str, out: str, tv: bool = False, device: str = "cuda", pose_d
             """A chunk's CPU work, run while the GPU works on the chunk before: the ball model's inputs and the
             court checks (a chunk of CHUNK frames holds several, run side by side)."""
             t = time.time()
+            if on_frames:
+                on_frames(i0, fs)
             smalls = list(pool.map(wasb.small, fs)) if wasb else [None] * len(fs)
             got = {}
             if tv:
