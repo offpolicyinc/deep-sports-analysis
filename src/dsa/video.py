@@ -52,6 +52,37 @@ def frames(video: str, limit: int = 0, start: int = 0):
         p.wait()
 
 
+def frames_at(video: str, wanted) -> "Iterator[tuple[int, np.ndarray]]":
+    """(i, BGR frame) for each frame i in `wanted`, in order: ffmpeg still decodes every frame, but converts and
+    sends only these (byte-identical to frames()'s), which is most of frames()'s cost when few are wanted."""
+    import tempfile
+
+    fps, w, h = info(video)
+    runs: list[list[int]] = []
+    for i in sorted(wanted):
+        if runs and i == runs[-1][1] + 1:
+            runs[-1][1] = i
+        else:
+            runs.append([i, i])
+    if not runs:
+        return
+    with tempfile.NamedTemporaryFile("w", suffix=".txt") as script:    # a filter script: thousands of frames
+        script.write("select=" + "+".join(f"between(n\\,{a}\\,{b})" for a, b in runs))
+        script.flush()
+        p = subprocess.Popen(["ffmpeg", "-v", "error", "-threads", "0", "-i", str(video), "-filter_script:v",
+                              script.name, "-fps_mode", "passthrough", "-f", "rawvideo", "-pix_fmt", "bgr24", "-"],
+                             stdout=subprocess.PIPE, bufsize=w * h * 3 * 4)
+        try:
+            for i in (i for a, b in runs for i in range(a, b + 1)):
+                buf = p.stdout.read(w * h * 3)
+                if len(buf) < w * h * 3:
+                    break
+                yield i, np.frombuffer(buf, np.uint8).reshape(h, w, 3)
+        finally:
+            p.kill()
+            p.wait()
+
+
 def cut(src: str, start: float, seconds: float, out: Path) -> None:
     """A clip at 30 fps, at most 1080p, no sound."""
     out.parent.mkdir(parents=True, exist_ok=True)
