@@ -42,12 +42,14 @@ NAMES = ["nose", "l_shoulder", "r_shoulder", "l_elbow", "r_elbow", "l_wrist", "r
          "l_knee", "r_knee", "l_ankle", "r_ankle"]
 MIRROR = [0, 2, 1, 4, 3, 6, 5, 8, 7, 10, 9, 12, 11]                 # left <-> right, for left-handers
 LEFTY = {"Feliciano Lopez", "Fernando Verdasco", "Donald Young", "Adrian Mannarino", "Rafael Nadal", "Ben Shelton",
-         "Denis Shapovalov", "Jack Draper", "Player F"}
+         "Denis Shapovalov", "Jack Draper"}                 # pros
 
 
-def lefty(player: str) -> bool:
-    """Left-handed, by full name or (Federer's opponents, named from the match title) surname alone."""
-    return player in LEFTY or any(player == n.split()[-1] for n in LEFTY)
+def lefty(player: str, project: str) -> bool:
+    """Left-handed: listed in the project's "lefty", or a pro by full name or (Federer's opponents, named from the
+    match title) surname alone."""
+    return (player in PROJECTS[project].get("lefty", ()) or player in LEFTY
+            or any(player == n.split()[-1] for n in LEFTY))
 
 
 KINDS = {                     # which hits; the front foot at contact for a right-hander; mirrored for analysis
@@ -145,14 +147,14 @@ def hits(spec: str, kind: str) -> tuple[list[dict], np.ndarray, np.ndarray]:
                 cam["ppm"] = float(np.linalg.norm(ends[0][:2] / ends[0][2] - ends[1][:2] / ends[1][2]))
         stance = None
         if ground is not None:                       # ankles on the court, metres: x right, y toward the near baseline
-            swap = (lefty(player)) != (KINDS[kind]["front"] == "right")      # ground[0] is the left ankle
+            swap = (lefty(player, project)) != (KINDS[kind]["front"] == "right")      # ground[0] is the left ankle
             front, back = (ground[1], ground[0]) if swap else (ground[0], ground[1])
             # across: how far the front foot has stepped across the back one, toward the other foot's side (negative:
             # out to its own side, an open stance); the near player faces the net, so the court's right is his right
             across = (back[0] - front[0]) if swap else (front[0] - back[0])      # swap: the front foot is the right one
             stance = {"stance_m": float(np.linalg.norm(front - back)), "stance_side_m": float(abs(front[0] - back[0])),
                       "stance_fwd_m": float(back[1] - front[1]), "stance_across_m": float(across)}
-        if lefty(player):
+        if lefty(player, project):
             pose = pose[:, MIRROR]
             pose[..., 0] = -pose[..., 0]
             foot[:, 1] = -foot[:, 1]
@@ -163,7 +165,7 @@ def hits(spec: str, kind: str) -> tuple[list[dict], np.ndarray, np.ndarray]:
                 if np.isfinite(side) and (side > 0) != (kind == "forehand"):    # (it often swaps a left-hander's)
                     continue
         meta.append({"video": v, "year": int(v[:4]), "frame": f, "player": player, "his": player == who,
-                     "lefty": lefty(player), "direction": h["direction"], "outcome": h["outcome"],
+                     "lefty": lefty(player, project), "direction": h["direction"], "outcome": h["outcome"],
                      "shot": h["shot"], "hand": h["hand"], "technique": h["technique"],
                      "camera": cam, "stance": stance,
                      "height": float(np.nanmedian(height)) if np.isfinite(height).any() else None})

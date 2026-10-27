@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from pathlib import Path
 
 import cv2
 import numpy as np
@@ -52,9 +53,8 @@ def sheet(video: str, shots: list[tuple[int, list[int]]]) -> np.ndarray:
     return np.hstack(tiles)
 
 
-def name(spec: str, test: bool = False) -> dict:
-    project, v = spec.split("/")
-    p = PROJECTS[project]
+def sheets(spec: str, test: bool = False) -> list[Path]:
+    """names_player1.jpg and names_player2.jpg: each player at CROPS moments of the video."""
     src = video_dir(spec)
     d = src / "test" if test else src
     video = str(src / ("kept.mp4" if (src / "kept.json").exists() else "source.mp4"))
@@ -63,6 +63,15 @@ def name(spec: str, test: bool = False) -> dict:
     for k in (1, 2):
         imgs.append(d / f"names_player{k}.jpg")
         cv2.imwrite(str(imgs[-1]), sheet(video, moments(players, k)), [cv2.IMWRITE_JPEG_QUALITY, 92])
+    return imgs
+
+
+def name(spec: str, test: bool = False) -> dict:
+    project, v = spec.split("/")
+    p = PROJECTS[project]
+    src = video_dir(spec)
+    d = src / "test" if test else src
+    imgs = sheets(spec, test)
     info = p["videos"][v]
     both = None if "who" in p else pair(spec)
     match = info[1] if both else f"{v}, {info[1]}"

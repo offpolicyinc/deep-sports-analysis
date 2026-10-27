@@ -109,6 +109,7 @@ PROJECTS = {
         # m, guessed from the footage (none told us yet): only for dsa.measure.profiles' phone foreshortening
         "heights": {"Player A": 1.63, "Player B": 1.80, "Player C": 1.80, "Player D": 1.55, "Player E": 1.80,
                     "Player F": 1.78, "Player G": 1.73},
+        "lefty": ["Player F"],
         "compare_with": "atp_hardcourt",
         "strokes": True,
         # name: (recording on the external drive, match, start s, seconds kept; 0 = all, (player, opponent)).

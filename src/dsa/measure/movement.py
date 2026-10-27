@@ -89,7 +89,7 @@ def track(spec: str) -> list[dict]:
                                  if np.isfinite(c).sum() >= 2 else np.full(len(grid), np.nan)
                                  for c in x.reshape(n, -1).T], 1).reshape((len(grid),) + x.shape[1:])
         pose, feet, hgt = rs(joint), rs(ground), rs(height[:, None])[:, 0]
-        if lefty(player):
+        if lefty(player, spec.split("/")[0]):
             pose = pose[:, MIRROR_ALL]
             pose[..., 0] = -pose[..., 0]
             feet = feet[:, [1, 0, 3, 2]]
@@ -98,7 +98,7 @@ def track(spec: str) -> list[dict]:
                  "technique": h["technique"], "direction": h["direction"], "outcome": h["outcome"]}
                 for h in d["hits"] if f0 <= h["frame"] < f1]
         c = d["court"][(f0 + f1) // 2] if d["court"] is not None else None
-        out.append({"video": v, "year": int(v[:4]), "his": player == who, "player": player, "lefty": lefty(player),
+        out.append({"video": v, "year": int(v[:4]), "his": player == who, "player": player, "lefty": lefty(player, spec.split("/")[0]),
                     "frame": f0, "hits": hits, "pose": pose.astype(np.float32), "feet": feet.astype(np.float32),
                     "height": hgt.astype(np.float32),
                     "zoom": float(np.linalg.norm(c[3] - c[2]) / d["size"][0]) if c is not None else None})

@@ -491,7 +491,7 @@ def label(spec: str, verbose: bool = True, scoreboard: bool = True) -> tuple[dic
     if verbose:
         print("weights:", ", ".join(f"{k} {v:.2f}" for k, v in sorted(zip(FEATURES, w / w.sum()), key=lambda t: -t[1])[:6]))
     from dsa.measure.technique import lefty
-    left = [lefty(n) for n in both]
+    left = [lefty(n, spec.split("/")[0]) for n in both]
     extra = np.zeros((len(units), 2))            # per unit and label: the hand votes against that player
     if sum(left) == 1:
         votes = hands(units, pk, spec)
