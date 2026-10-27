@@ -42,6 +42,7 @@ LEFT, RIGHT, FAR, NEAR, NET, MID = 286, 1379, 561, 2935, 1748, 832
 METRE = 1117 / 10.97
 
 WINDOW_S, SHIFT = 5.0, 10.0
+CONSISTENT = 0.02                   # of the frame's width: a marked point further off the court the rest make is wrong
 MOVED = 40.0                        # px: a re-snapped court further than this from the last one is a new position
 COURT_EVERY, COURT_HOLD = 5, 15     # frames (tv): a check every 5 frames; a failed one keeps the last court
 JUMPY, JUMPY_WINDOW = 0.04, 9        # tv: a check off the median of the 9 around it by 4% of the court's width
@@ -102,6 +103,18 @@ def in_area(xy: np.ndarray) -> np.ndarray:
     x, y = xy[:, 0], xy[:, 1]
     area = (x >= LEFT - 3.5 * METRE) & (x <= RIGHT + 3.5 * METRE) & (y >= FAR - 8 * METRE) & (y <= NEAR + 8 * METRE)
     return area & ~((np.abs(y - NET) < 2 * METRE) & ~((x >= LEFT) & (x <= RIGHT)))
+
+
+def consistent(pts: np.ndarray, w: int) -> np.ndarray:
+    """Marked points made one court: a homography fitted without the points that disagree with the rest (RANSAC,
+    within CONSISTENT of the frame's width), each point then put where it says. Opus now and then labels a line
+    wrong (the far service line, squeezed behind the net on a low phone), which would skew the whole court."""
+    m, agree = cv2.findHomography(np.float32(REF), np.float32(pts[:, :2]), cv2.RANSAC, CONSISTENT * w)
+    if m is None or agree.sum() < 8:
+        return pts
+    out = pts.copy()
+    out[:, :2] = cv2.perspectiveTransform(np.float32(REF)[None], m)[0]
+    return out
 
 
 def court_ok(pts: np.ndarray | None, size: tuple[int, int]) -> bool:
@@ -173,7 +186,7 @@ def ask_opus(video: str, frame: int, work: Path, what: str = "tennis video filme
     h, w = bgr.shape[:2]
     ans, _ = ask(prompt(w, h, what), [img.resolve(), (work / "diagram.png").resolve()], SCHEMA, work / "cache")
     raw = np.array([[q["x"], q["y"], 2.0 if q["in_view"] else 0.0] for q in ans["points"]], np.float32)
-    return snap(bgr, raw)
+    return snap(bgr, consistent(raw, w))
 
 
 def phone(video: str, fps: float, n: int, work: Path) -> tuple[list[np.ndarray | None], list[str]]:
