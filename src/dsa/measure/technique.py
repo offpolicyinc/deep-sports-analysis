@@ -519,6 +519,10 @@ def camera(meta: list[dict], score: np.ndarray, lo: int, hi: int) -> np.ndarray:
     return np.where(np.isfinite(cam), cam, np.nanmedian(cam, 0))
 
 
+class NoStrokes(ValueError):
+    """prepare: not one stroke of the kind seen well enough (QUALITY) to measure."""
+
+
 def prepare(project: str, kind: str, group, yscale: float = 1.0) -> dict:
     """The kind's strokes, measured: hits.npz / hits.json (extract), well seen, routine (STANDARD: a routine
     situation and no measure far from that group's usual; groups: group(meta row), e.g. him / his opponents, or
@@ -539,6 +543,8 @@ def prepare(project: str, kind: str, group, yscale: float = 1.0) -> dict:
     seen = np.isfinite(xy[:, lo:hi + 1, :, 0]).mean((1, 2))
     ctx_ok = np.isfinite(feet[:, int(np.argmin(abs(grid)))]).all(1)
     keep = np.flatnonzero((seen >= QUALITY) & ctx_ok)
+    if not len(keep):
+        raise NoStrokes(f"{project}: no {kind} seen well enough to measure")
     score = z["pose"][keep, :, :, 2]
     xy, feet, meta = fill(xy[keep]), fill(feet[keep]), [meta[i] for i in keep]
     w = align(xy, grid, win)

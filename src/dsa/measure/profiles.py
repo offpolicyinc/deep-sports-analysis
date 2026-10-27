@@ -20,7 +20,7 @@ import json
 import numpy as np
 
 from dsa.ingest.projects import PROJECTS, match
-from dsa.measure.technique import MEASURES, camera, prepare
+from dsa.measure.technique import KINDS as WINDOWS, MEASURES, WIN, NoStrokes, camera, prepare
 from dsa.paths import PROJECTS as ROOT_PROJECTS
 
 KINDS = ["forehand", "backhand", "serve"]
@@ -189,22 +189,30 @@ def movement(project: str) -> dict:
 
 
 def stature(project: str, kind: str, yscale: float = 1.0) -> dict[str, float]:
-    """Per player with a known height ("heights"), his median torso as the camera sees it over his height."""
-    d = prepare(project, kind, lambda m: m["player"], yscale)
+    """Per player with a known height ("heights"), his median torso as the camera sees it over his height; none
+    without a stroke of the kind seen well."""
+    try:
+        d = prepare(project, kind, lambda m: m["player"], yscale)
+    except NoStrokes:
+        return {}
     m = torso_m(d["z"], d["keep"], d["lo"], d["hi"], d["meta"], yscale)
     player = np.array([x["player"] for x in d["meta"]])
     heights = PROJECTS[project].get("heights", {})
     return {p: float(np.nanmedian(m[player == p]) / heights[p]) for p in dict.fromkeys(player) if p in heights}
 
 
-def foreshortening(project: str, kind: str) -> dict:
+def foreshortening(project: str, kind: str) -> dict | None:
     """How much longer a body looks, for its height, on this project's camera than on compare_with's: the median of
     its players' torso-to-height ratios over the median of the other project's (each player's own median first). A
     phone behind the baseline sits lower than a TV camera and sees the body less foreshortened, so its torsos look
     longer: a length out to the side, in torso lengths, comes out short, and an angle from upright small.
     k: what the skeletons' heights are divided by so the medians match. A leaning torso shortens by less than the
-    heights do, so k is found by a few rounds of rescaling, not taken from the ratio itself."""
-    ours, theirs = stature(project, kind), stature(PROJECTS[project]["compare_with"], kind)
+    heights do, so k is found by a few rounds of rescaling, not taken from the ratio itself. None when none of
+    its players' strokes of this kind is routine (a short video, or one filmed mostly from the far end)."""
+    ours = stature(project, kind)
+    if not ours:
+        return None
+    theirs = stature(PROJECTS[project]["compare_with"], kind)
     target, k = np.median(list(theirs.values())), np.median(list(ours.values())) / np.median(list(theirs.values()))
     for _ in range(4):
         k *= np.median(list(stature(project, kind, 1 / k).values())) / target
@@ -221,6 +229,8 @@ def guests(project: str, kind: str) -> dict:
     toward the net, which no scaling of the picture fixes."""
     names, lengths = list(MEASURES[kind][0]), MEASURES[kind][1]
     fs = foreshortening(project, kind)
+    if fs is None:
+        return nothing(project, kind)
     d = prepare(project, kind, lambda m: m["player"], 1 / fs["k"])
     f, meta, z, lo, hi = d["f"], d["meta"], d["z"], d["lo"], d["hi"]
     player = np.array([m["player"] for m in meta])
@@ -240,6 +250,19 @@ def guests(project: str, kind: str) -> dict:
             "median": {p: np.nanmedian(g[player == p], 0).round(4).tolist() for p in dict.fromkeys(player)},
             "win": list(d["win"]),
             "mean_pose": {str(p): np.nanmean(d["w"][player == p], 0).round(4).tolist() for p in dict.fromkeys(player)}}
+
+
+def nothing(project: str, kind: str) -> dict:
+    """guests' result for a kind none of the project's players has a routine stroke of: no strokes, same shape."""
+    names, lengths = list(MEASURES[kind][0]), MEASURES[kind][1]
+    hits = json.loads((ROOT_PROJECTS / project / "technique" / kind / "hits.json").read_text())
+    (ROOT_PROJECTS / project / "profiles").mkdir(parents=True, exist_ok=True)
+    np.savez_compressed(ROOT_PROJECTS / project / "profiles" / f"{kind}_strokes.npz", hit=np.zeros(0, int),
+                        f=np.zeros((0, len(names))), ctx=np.zeros((0, 3)), quality=np.zeros(0),
+                        player=np.zeros(0, str))
+    return {"kind": kind, "features": names, "lengths": lengths, "kept": 0, "extracted": len(hits), "strokes": {},
+            "videos": {}, "camera": {}, "foreshortening": None, "after": {}, "box": {}, "median": {},
+            "win": list(WINDOWS[kind].get("win", WIN)), "mean_pose": {}}
 
 
 def run(project: str) -> None:
