@@ -111,12 +111,7 @@ PROJECTS = {
                     "Player F": 1.78, "Player G": 1.73},
         "compare_with": "atp_hardcourt",
         "strokes": True,
-        # dsa.measure.technique's feed test off: filmed low from just behind the near player, the ball from the other
-        # end never shows above his head (it kept 1 of 38 forehands in G's, 0 of 11 in C's YouTube one; elsewhere it
-        # drops one or two)
         "phone": True,                         # dsa.measure.technique.PHONE_DEPTH
-        "no_feed_check": ["2026_g", "2025_c_yt", "2025_c_yt_x2"],
-        "blur": {"2026_g": [[0, 0, 460, 230]]},    # dsa.pages.exemplars: the app's scoreboard, with both players' names
         # name: (recording on the external drive, match, start s, seconds kept; 0 = all, (player, opponent)).
         # Left out: three 12-16 s screen recordings of the SwingVision app (portrait, its UI on top)
         "videos": {

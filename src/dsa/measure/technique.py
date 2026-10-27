@@ -37,8 +37,6 @@ def grid(hz: int = HZ) -> np.ndarray:
 
 GRID = grid()
 SMOOTH_S = 0.17                              # seconds: dsa.scene.clean's smoothing span at 30 fps, for dsa.gpu.fine's frames
-FEED = 0.3                                   # forehand / backhand: the ball seen at least this many of his heights
-                                             # above his head before contact (from the other end), else a feed
 JOINTS = [0, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]            # dsa.gpu.models.KP: nose, then body pairs L/R
 NAMES = ["nose", "l_shoulder", "r_shoulder", "l_elbow", "r_elbow", "l_wrist", "r_wrist", "l_hip", "r_hip",
          "l_knee", "r_knee", "l_ankle", "r_ankle"]
@@ -172,12 +170,6 @@ def hits(spec: str, kind: str) -> tuple[list[dict], np.ndarray, np.ndarray]:
                 side = x[6] - x[7:9].mean() if kind == "forehand" else x[5:7].mean() - x[7:9].mean()
                 if np.isfinite(side) and (side > 0) != (kind == "forehand"):    # (it often swaps a left-hander's)
                     continue
-            b = pb[f][0]                             # and only a ball that came from the other end: seen above his
-            ball = d["ball"][max(lo, f - int(1.2 * fps)):f - int(0.15 * fps)]   # head in the second before, not
-            ys = ball[ball[:, 0] > 0, 2]             # a feed (dropped and hit, it never rises above him)
-            if (b is not None and len(ys) and (b[1] - ys.min()) / (b[3] - b[1]) < FEED
-                    and v not in PROJECTS[project].get("no_feed_check", []) and "by" not in h):   # labelled: no feeds
-                continue
         meta.append({"video": v, "year": int(v[:4]), "frame": f, "player": player, "his": player == who,
                      "lefty": lefty(player), "direction": h["direction"], "outcome": h["outcome"],
                      "shot": h["shot"], "hand": h["hand"], "technique": h["technique"],
