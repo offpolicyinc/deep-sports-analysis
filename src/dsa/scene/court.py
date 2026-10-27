@@ -1,12 +1,10 @@
 """The court in every frame: 14 points where court lines cross, in the order of POINTS.
 
-  phone   the camera is fixed but gets bumped. The clip is cut where the scene behind the people changes
-          (segments: median of each WINDOW_S window, 192 x 108 grey; a new position when it differs from
-          the current one's by more than SHIFT grey levels on average). Opus marks the court on a frame of
-          the first position; each later one first tries the previous court snapped to its own lines
-          (moving shadows look like a new position but are not) and asks Opus again only when that fails
-          or lands more than MOVED px away. Opus's points are snapped to the painted lines (dsa.scene.court_snap);
-          kept as marked when the snap fails.
+  phone   the camera is fixed but gets bumped. Opus marks the court once, OPUS_IN_S in, snapped to the painted
+          lines (dsa.scene.court_snap; kept as marked when the snap fails). Every WINDOW_S a frame is aligned to
+          the marked one by what doesn't move (ORB features, a RANSAC homography: the players moving through
+          don't count, nor do shadows, which have no corners); when the camera has moved the court moves with
+          it. Opus is asked again only when a frame can't be aligned at all: the view itself changed.
   tv      the camera pans and cuts. TennisCourtDetector runs every COURT_EVERY frames on the GPU
           (dsa.gpu.process); its points are kept when they form a plausible whole court, else snapped to the lines.
           A check that jumps away from the ones around it is replaced by their median (`steady`).
@@ -24,7 +22,7 @@ from pathlib import Path
 import cv2
 import numpy as np
 
-from dsa.video import frame_at
+from dsa.video import frame_at, info
 
 POINTS = [
     "far baseline, left doubles corner", "far baseline, right doubles corner",
@@ -41,9 +39,12 @@ LINES = [(0, 1), (2, 3), (0, 2), (1, 3), (4, 5), (6, 7), (8, 9), (10, 11), (12, 
 LEFT, RIGHT, FAR, NEAR, NET, MID = 286, 1379, 561, 2935, 1748, 832
 METRE = 1117 / 10.97
 
-WINDOW_S, SHIFT = 5.0, 10.0
+WINDOW_S, OPUS_IN_S = 5.0, 2.0      # phone: the camera checked every 5 s; Opus marks the court 2 s in
+ALIGN_W, RANSAC_PX = 960, 3.0       # frames aligned at 960 px wide, a feature agreeing within 3 px
+MIN_MATCHED, STILL_PX = 60, 6.0     # fewer features agreeing: the view changed; a court within 6 px: not moved
+ORB = cv2.ORB_create(4000)
+MATCHER = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
 CONSISTENT = 0.02                   # of the frame's width: a marked point further off the court the rest make is wrong
-MOVED = 40.0                        # px: a re-snapped court further than this from the last one is a new position
 COURT_EVERY, COURT_HOLD = 5, 15     # frames (tv): a check every 5 frames; a failed one keeps the last court
 JUMPY, JUMPY_WINDOW = 0.04, 9        # tv: a check off the median of the 9 around it by 4% of the court's width
 
@@ -149,20 +150,33 @@ def main_camera(pts: np.ndarray, w: int, min_depth: float = MIN_DEPTH) -> bool:
 
 # --- phone --------------------------------------------------------------------------------------------------
 
-def segments(video: str, fps: float, n: int) -> list[tuple[int, int]]:
-    """[(first frame, end frame)] of each camera position."""
-    w, h, per = 192, 108, 2                                     # 2 samples a second
-    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", str(video), "-vf", f"fps={per},scale={w}:{h},format=gray",
+def samples(video: str, first: int, step: int) -> np.ndarray:
+    """Frames first, first + step, ... grey and ALIGN_W wide: (k, h, ALIGN_W) uint8."""
+    w, h = info(video)[1:]
+    ah = round(h * ALIGN_W / w / 2) * 2
+    pick = f"select='gte(n\\,{first})*not(mod(n-{first}\\,{step}))',scale={ALIGN_W}:{ah},format=gray"
+    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", str(video), "-vf", pick, "-fps_mode", "passthrough",
                           "-f", "rawvideo", "-"], capture_output=True, check=True).stdout
-    g = np.frombuffer(raw, np.uint8).reshape(-1, h, w).astype(np.float32)
-    k = int(WINDOW_S * per)
-    bg = [np.median(g[i:i + k], axis=0) for i in range(0, len(g), k)]
-    cuts, ref = [0], bg[0]
-    for i, b in enumerate(bg[1:], 1):
-        if np.abs(b - ref).mean() > SHIFT:
-            cuts.append(int(i * WINDOW_S * fps))
-            ref = b
-    return [(a, b) for a, b in zip(cuts, cuts[1:] + [n])]
+    return np.frombuffer(raw, np.uint8).reshape(-1, ah, ALIGN_W)
+
+
+def align(ref: tuple, grey: np.ndarray, scale: float) -> np.ndarray | None:
+    """The homography taking full-size points of the frame `ref` (orb.detectAndCompute's) was made from to the
+    same points in `grey`, from what doesn't move between them (RANSAC drops the players); None when too little
+    matches: the view changed, not the camera."""
+    kp, des = ORB.detectAndCompute(grey, None)
+    if des is None or ref[1] is None:
+        return None
+    pairs = MATCHER.match(ref[1], des)
+    if len(pairs) < MIN_MATCHED:
+        return None
+    a = np.float32([ref[0][p.queryIdx].pt for p in pairs])
+    b = np.float32([kp[p.trainIdx].pt for p in pairs])
+    m, ok = cv2.findHomography(a, b, cv2.RANSAC, RANSAC_PX)
+    if m is None or ok.sum() < MIN_MATCHED:
+        return None
+    s = np.diag([scale, scale, 1.0])
+    return s @ m @ np.linalg.inv(s)
 
 
 def snap(bgr: np.ndarray, rough: np.ndarray) -> tuple[np.ndarray, bool]:
@@ -190,27 +204,30 @@ def ask_opus(video: str, frame: int, work: Path, what: str = "tennis video filme
 
 
 def phone(video: str, fps: float, n: int, work: Path) -> tuple[list[np.ndarray | None], list[str]]:
-    """The court of every frame, and a line per camera position saying how it was found."""
+    """The court of every frame, and a line per camera position saying how it was found: Opus marks it once, and
+    it follows the camera (see the module's docstring)."""
+    first, step = min(round(OPUS_IN_S * fps), n - 1), round(WINDOW_S * fps)
+    scale = info(video)[1] / ALIGN_W
+    segs: list[list] = []                                       # [first frame, court, how]
+    ref = court = None                                          # the marked frame's features, and its court
+    for k, g in enumerate(samples(video, first, step)):
+        f = first + k * step
+        m = align(ref, g, scale) if ref else None
+        if m is None:                                           # the start, or a view nothing matches: Opus
+            court, ok = ask_opus(video, f, work)
+            ref = ORB.detectAndCompute(g, None)
+            segs.append([0 if k == 0 else f, court, "Opus" + (", snapped" if ok else ", as marked")])
+            continue
+        moved = cv2.perspectiveTransform(np.float32(court)[:, None, :2], m).reshape(-1, 2)
+        if np.median(np.hypot(*(moved - segs[-1][1][:, :2]).T)) > STILL_PX:
+            segs.append([f, moved, f"camera moved {np.median(np.hypot(*(moved - court[:, :2]).T)):.0f} px, followed"])
+    ends = [s[0] for s in segs[1:]] + [n]
     out: list[np.ndarray | None] = [None] * n
-    log, prev, segs = [], None, []
-    work.mkdir(parents=True, exist_ok=True)
-    for s0, s1 in segments(video, fps, n):
-        f = min(s0 + int(2 * fps), s1 - 1)
-        pts, how = None, ""
-        if prev is not None:
-            snapped, ok = snap(frame_at(video, f), prev)
-            if ok and np.median(np.hypot(*(snapped - prev).T)) <= MOVED:
-                pts, how = snapped, "same court, re-snapped"
-        if pts is None:
-            pts, ok = ask_opus(video, f, work)
-            how = "Opus" + (", snapped" if ok else ", as marked")
+    for (s0, pts, _), s1 in zip(segs, ends):
         out[s0:s1] = [pts] * (s1 - s0)
-        log.append(f"{s0 / fps:.0f}-{s1 / fps:.0f} s: {how}")
-        segs.append((s0, s1, pts))
-        prev = pts
-    np.savez(work / "court.npz", start=np.array([a for a, _, _ in segs]), end=np.array([b for _, b, _ in segs]),
-             points=np.array([p for _, _, p in segs], float))          # read back by dsa.scene.results
-    return out, log
+    np.savez(work / "court.npz", start=np.array([s[0] for s in segs]), end=np.array(ends),
+             points=np.array([s[1][:, :2] for s in segs], float))  # read back by dsa.scene.results
+    return out, [f"{s[0] / fps:.0f}-{e / fps:.0f} s: {s[2]}" for s, e in zip(segs, ends)]
 
 
 def phone_saved(work: Path, n: int) -> list[np.ndarray | None] | None:
