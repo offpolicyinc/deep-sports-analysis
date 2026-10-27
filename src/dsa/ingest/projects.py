@@ -111,7 +111,6 @@ PROJECTS = {
                     "Player F": 1.78, "Player G": 1.73},
         "compare_with": "atp_hardcourt",
         "strokes": True,
-        "phone": True,                         # dsa.measure.technique.PHONE_DEPTH
         # name: (recording on the external drive, match, start s, seconds kept; 0 = all, (player, opponent)).
         # Left out: three 12-16 s screen recordings of the SwingVision app (portrait, its UI on top)
         "videos": {

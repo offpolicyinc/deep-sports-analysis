@@ -79,18 +79,10 @@ def hits(spec: str, kind: str) -> tuple[list[dict], np.ndarray, np.ndarray]:
                 "ratio": fj["ratio"], "windows": fj["windows"]}
         fine["smooth"] = int(round(SMOOTH_S * fine["fps"])) // 2 * 2 + 1         # odd, the same span in seconds
     fps, starts, nf, pb = d["fps"], [int(a) for a in d["starts"]], d["pl"]["near_far"], d["pl"]["boxes"]
-    phone = PROJECTS[project].get("phone", False)
-
-    def chosen(h: dict) -> bool:
-        if KINDS[kind]["select"](h):
-            return True
-        if phone and kind in ("forehand", "backhand"):
-            return (h["shot"], h["hand"], h["technique"]) == ("stroke", kind[0] + "h", "lob")
-        return phone and kind == "serve" and (h["shot"], h["technique"]) == ("stroke", "smash")
 
     meta, poses, feet = [], [], []
     for h, player in owners(spec):
-        if player is None or h["side"] != "near" or not chosen(h):
+        if player is None or h["side"] != "near" or not KINDS[kind]["select"](h):
             continue
         f = h["frame"]
         lo = max(a for a in starts[:-1] if a <= f)
@@ -208,11 +200,8 @@ STANDARD = {"depth": (-1.0, 3.0),            # routine strokes only: metres behi
             "rise": 0.3}                     # forehand / backhand: the wrist this many torso lengths higher 0.3 s
                                              # after contact than 0.15 s before (low to high: no slices, drop shots,
                                              # blocks or stretched defensive swings, which the labels miss)
-PHONE_DEPTH = (-3.0, 3.0)                    # projects with "phone": amateurs rally from up to 3 m inside the baseline
-                                             # (forehand / backhand); and dsa.gpu.strokes on a low phone behind the
-                                             # baseline calls many forehands / backhands "lob" and most serves
-                                             # "stroke, smash", so hits() takes those too (a real smash, near the
-                                             # net, fails the serve's depth)
+AMATEUR_DEPTH = (-3.0, 3.0)                  # projects measured against the pros ("compare_with"): amateurs rally
+                                             # from up to 3 m inside the baseline (forehand / backhand)
 
 
 def era(year: int) -> int:
@@ -559,7 +548,7 @@ def prepare(project: str, kind: str, group, yscale: float = 1.0) -> dict:
     std = np.ones(len(f), bool)
     extreme = np.zeros(len(f), bool)
     if kind in ("forehand", "backhand", "serve"):
-        depth = PHONE_DEPTH if PROJECTS[project].get("phone") and kind != "serve" else STANDARD["depth"]
+        depth = AMATEUR_DEPTH if PROJECTS[project].get("compare_with") and kind != "serve" else STANDARD["depth"]
         std = (ctx[:, 0] >= depth[0]) & (ctx[:, 0] <= depth[1])
         if kind != "serve":
             rise = xy[:, int(np.argmin(abs(grid - 0.3))), 6, 1] - xy[:, int(np.argmin(abs(grid + 0.15))), 6, 1]
