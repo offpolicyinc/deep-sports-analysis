@@ -52,7 +52,7 @@ def process(video: str, out: str, tv: bool = False, device: str = "cuda", pose_d
     from dsa.gpu.models import KP, Pose
     from dsa.scene import tracks
     from dsa.scene.court import COURT_EVERY, COURT_HOLD, NET, check_tv, homography, in_area
-    from dsa.video import frames, frames_at, info
+    from dsa.video import frames, info
 
     t0 = time.time()
     breaks = set(breaks)
@@ -226,7 +226,7 @@ def process(video: str, out: str, tv: bool = False, device: str = "cuda", pose_d
         posed = sum(map(len, want.values()))
         if want:
             pose = (models or {}).get("pose") or Pose(pose_device)
-            for i, f in frames_at(video, want) if pose_frames is not None else enumerate(frames(video, limit)):
+            for i, f in enumerate(frames(video, limit)):
                 js = want.get(i, [])
                 crops.extend((i, j, c) for j, c in zip(js, pool.map(lambda j: pose.prepare(f, boxes[i][j]), js)))
                 if len(crops) >= POSE_BATCH:
