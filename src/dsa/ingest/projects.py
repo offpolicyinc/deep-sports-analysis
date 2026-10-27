@@ -4,7 +4,9 @@ dsa.paths.video_dir). Downloading them: dsa.ingest.download.
 from __future__ import annotations
 
 import json
+import os
 import re
+from pathlib import Path
 
 from dsa.paths import ROOT
 
@@ -287,6 +289,14 @@ for _v in (json.loads(PAD.read_text()) if PAD.exists() else []):
 def match(video: str) -> str:
     """The match a video is part of (a "_b" video and the later pieces "_x<k>" (dsa.ingest.pad) continue it)."""
     return re.sub(r"_x\d+$", "", video).removesuffix("_b")
+
+
+# projects from outside dsa (the app's players): a JSON file of more entries of the same shape, named by DSA_PROJECTS;
+# JSON's lists become the tuples a video's entry holds
+if os.environ.get("DSA_PROJECTS"):
+    for _name, _p in json.loads(Path(os.environ["DSA_PROJECTS"]).read_text()).items():
+        _p["videos"] = {v: tuple(tuple(x) if isinstance(x, list) else x for x in e) for v, e in _p["videos"].items()}
+        PROJECTS[_name] = _p
 
 
 def pair(spec: str) -> tuple[str, str]:
