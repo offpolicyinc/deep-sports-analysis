@@ -33,13 +33,19 @@ SCHEMA = {
 
 
 def moments(players: dict, k: int) -> list[tuple[int, list[int]]]:
-    """[(frame, box)] for player k: CROPS frames spread over the video, at the near end when they spend at
-    least NEAR_SHARE of their time there (a few seconds at the near end are more likely a mix-up, e.g. a ball
-    kid crossing in front of the net, than the player)."""
-    at = [[i for i, (s, b) in enumerate(zip(players["near_far"], players["boxes"])) if s[side] == k and b[side]]
-          for side in (0, 1)]
+    """[(frame, box)] for player k: CROPS frames spread over the video while both players are on court, at the near
+    end when they spend at least NEAR_SHARE of their time there (a few seconds at the near end are more likely a
+    mix-up, e.g. a ball kid crossing in front of the net, than the player)."""
+    def frames(both: bool) -> list[list[int]]:
+        return [[i for i, (s, b) in enumerate(zip(players["near_far"], players["boxes"]))
+                 if s[side] == k and b[side] and (not both or all(s))] for side in (0, 1)]
+
+    at = frames(both=True)                         # in play: the other player at the other end, not a warm-up or a
+    if sum(map(len, at)) < CROPS:                  # passer-by taken for one of them before play starts
+        at = frames(both=False)
     side = 0 if len(at[0]) >= max(CROPS, NEAR_SHARE * (len(at[0]) + len(at[1]))) else 1
-    pick = [at[side][int(j)] for j in np.linspace(0, len(at[side]) - 1, CROPS)] if at[side] else []
+    n = len(at[side])                              # evenly spread, the very first and last left out (play not
+    pick = [at[side][int(n * (j + 1) / (CROPS + 1))] for j in range(CROPS)] if n else []      # started, or over)
     return [(i, players["boxes"][i][side]) for i in pick]
 
 
