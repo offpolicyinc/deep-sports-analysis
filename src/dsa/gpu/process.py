@@ -20,7 +20,6 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
@@ -34,25 +33,16 @@ CHUNK = 64                      # frames decoded before their ball inputs and co
 
 def process(video: str, out: str, tv: bool = False, device: str = "cuda", pose_device: str = "cuda",
             limit: int = 0, batch: int = BATCH, on_pass1=None, breaks=(), near_only: bool = False,
-            court_every: int = 0, models: dict | None = None, ball: bool = True,
-            pose_frames: set[int] | Callable[[], set[int]] | None = None, pose_people: int = 0,
-            on_frames: Callable[[int, list[np.ndarray]], None] | None = None) -> dict:
+            court_every: int = 0, models: dict | None = None) -> dict:
     """TV options (a project's "gpu" in dsa.ingest.projects): near_only poses only people at the near end (a quarter of
     the skeletons, and all the stroke and movement analysis uses); court_every checks the court that often (frames;
-    default COURT_EVERY). models: already loaded ones (load_models), shared by runs side by side on one GPU.
-    Phone options, for when the strokes are known already (the app's stroke model): ball=False skips the ball (raw.npz's
-    ball is then all not-found); pose_frames poses only those frames (e.g. around each stroke), not every one (or is a
-    function giving them, called once pass 1 is done, so the strokes can be found alongside pass 1), and
-    pose_people also up to that many frames of every moving person, spread over their time (dsa.scene.identity
-    tells the two players apart from up to SAMPLES of each). on_frames(first, frames) sees every chunk of pass 1's
-    decoded frames, on a CPU thread while the GPU works, so another model can use the same decoding (not called
-    when pass 1 is reused from raw.pass1.npz)."""
+    default COURT_EVERY). models: already loaded ones (load_models), shared by runs side by side on one GPU."""
     import cv2
 
     from dsa.gpu.models import KP, Pose
     from dsa.scene import tracks
     from dsa.scene.court import COURT_EVERY, COURT_HOLD, NET, check_tv, homography, in_area
-    from dsa.video import frames, info, some
+    from dsa.video import frames, info
 
     t0 = time.time()
     breaks = set(breaks)
@@ -85,8 +75,8 @@ def process(video: str, out: str, tv: bool = False, device: str = "cuda", pose_d
         checks = list(z["court"]) if tv else []
         kp = list(np.split(z["kp"], cut)) if tv else []
     else:
-        m = models or load_models(tv, device, pose_device, ball)
-        det, wasb, tcd = m["det"], m.get("ball"), m.get("tcd")
+        m = models or load_models(tv, device, pose_device)
+        det, ball, tcd = m["det"], m["ball"], m.get("tcd")
         if tv:
             pose = m["pose"]
         small: dict[int, np.ndarray] = {}
@@ -119,10 +109,8 @@ def process(video: str, out: str, tv: bool = False, device: str = "cuda", pose_d
         def run_ball(upto: int):                # frames whose next neighbour has arrived (or the last frame)
             t = time.time()
             todo = list(range(len(balls), upto))
-            if todo and not wasb:
-                balls.extend(np.zeros((len(todo), 4), np.float32))
-            elif todo:
-                balls.extend(wasb.locate([[small[i - 1] if i and i not in breaks else small[i], small[i],
+            if todo:
+                balls.extend(ball.locate([[small[i - 1] if i and i not in breaks else small[i], small[i],
                                            small[i + 1] if i + 1 in small and i + 1 not in breaks else small[i]]
                                           for i in todo], W, H))
             for i in [k for k in small if k < upto - 2]:
@@ -135,9 +123,7 @@ def process(video: str, out: str, tv: bool = False, device: str = "cuda", pose_d
             """A chunk's CPU work, run while the GPU works on the chunk before: the ball model's inputs and the
             court checks (a chunk of CHUNK frames holds several, run side by side)."""
             t = time.time()
-            if on_frames:
-                on_frames(i0, fs)
-            smalls = list(pool.map(wasb.small, fs)) if wasb else [None] * len(fs)
+            smalls = list(pool.map(ball.small, fs))
             got = {}
             if tv:
                 due = [k for k in range(len(fs)) if (i0 + k) % every == 0 or i0 + k in breaks]
@@ -209,25 +195,15 @@ def process(video: str, out: str, tv: bool = False, device: str = "cuda", pose_d
     else:
         kp = [np.full((len(b), len(KP), 3), np.nan, np.float16) for b in boxes]
         want: dict[int, list[int]] = {}
-        everyone: dict[int, list[tuple[int, int]]] = {}                   # person -> [(frame, box)]
         for i in range(n):
             for j in np.flatnonzero(ids[i] >= 0):
                 if pp["person_of"][int(ids[i][j])] not in still:
-                    everyone.setdefault(pp["person_of"][int(ids[i][j])], []).append((i, int(j)))
-        if callable(pose_frames):              # worked out while pass 1 ran (e.g. from strokes found alongside it)
-            pose_frames = pose_frames()
-        chosen = set(range(n)) if pose_frames is None else {f for f in pose_frames if 0 <= f < n}
-        for seen in everyone.values():
-            spread = ({seen[int(k)] for k in np.linspace(0, len(seen) - 1, min(pose_people, len(seen)))}
-                      if pose_people else set())
-            for i, j in seen:
-                if i in chosen or (i, j) in spread:
                     want.setdefault(i, []).append(j)
         posed = sum(map(len, want.values()))
         if want:
             pose = (models or {}).get("pose") or Pose(pose_device)
-            for i, f in some(video, want):
-                js = want[i]
+            for i, f in enumerate(frames(video, limit)):
+                js = want.get(i, [])
                 crops.extend((i, j, c) for j, c in zip(js, pool.map(lambda j: pose.prepare(f, boxes[i][j]), js)))
                 if len(crops) >= POSE_BATCH:
                     flush()
@@ -244,11 +220,11 @@ def process(video: str, out: str, tv: bool = False, device: str = "cuda", pose_d
             "posed": posed, "ball_found": int(sum(b[0] for b in balls)), "seconds": tm}
 
 
-def load_models(tv: bool = True, device: str = "cuda", pose_device: str = "cuda", ball: bool = True) -> dict:
+def load_models(tv: bool = True, device: str = "cuda", pose_device: str = "cuda") -> dict:
     """The models process() runs, loaded once (several runs can share them: their calls are thread-safe)."""
     from dsa.gpu.models import Ball, Detector, Pose, Tcd
 
-    m = {"det": Detector(device)} | ({"ball": Ball(device)} if ball else {})
+    m = {"det": Detector(device), "ball": Ball(device)}
     if tv:
         m |= {"tcd": Tcd(device), "pose": Pose(pose_device)}
     return m

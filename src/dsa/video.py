@@ -32,7 +32,7 @@ def frame_at(video: str, i: int) -> np.ndarray:
 def frames(video: str, limit: int = 0, start: int = 0):
     """Yield BGR frames from frame `start`, decoded by ffmpeg on all cores in a reader thread."""
     fps, w, h = info(video)
-    cmd = ["ffmpeg", "-v", "error", "-threads", "0"] + (["-ss", f"{start / fps:.4f}"] if start else []) + ["-i", str(video)]
+    cmd = ["ffmpeg", "-v", "error", "-threads", "0"] + (["-ss", f"{(start - 0.5) / fps:.4f}"] if start else []) + ["-i", str(video)]
     if limit:
         cmd += ["-frames:v", str(limit)]
     p = subprocess.Popen(cmd + ["-f", "rawvideo", "-pix_fmt", "bgr24", "-"], stdout=subprocess.PIPE, bufsize=w * h * 3 * 4)
@@ -50,23 +50,6 @@ def frames(video: str, limit: int = 0, start: int = 0):
     finally:                    # a caller that stops early must not leave ffmpeg holding the file open (on a Modal
         p.kill()                # volume, an open file makes volume.commit() wait forever)
         p.wait()
-
-
-def some(video: str, wanted) -> "Iterator[tuple[int, np.ndarray]]":
-    """(i, BGR frame) for each frame i in `wanted`, in order, as frames() gives them: every frame up to the last
-    wanted is decoded, only the wanted ones converted to BGR (OpenCV's grab / retrieve), a third faster."""
-    import cv2
-
-    wanted = set(wanted)
-    cap = cv2.VideoCapture(str(video))
-    try:
-        for i in range(max(wanted) + 1 if wanted else 0):
-            if not cap.grab():
-                return
-            if i in wanted:
-                yield i, cap.retrieve()[1]
-    finally:
-        cap.release()
 
 
 def cut(src: str, start: float, seconds: float, out: Path) -> None:

@@ -36,15 +36,16 @@ class Detector:
         self.scale = torch.tensor(255.0, device=device)
         self.person = next(i for i, n in COCO_CLASSES.items() if n == "person")
 
-    def people(self, bgr: list[np.ndarray], threshold: float = 0.2) -> list[np.ndarray]:
-        """Per frame (n, 5): x1 y1 x2 y2 conf. The frames go to the GPU as bytes and become RF-DETR's input there,
-        exactly as its predict() would on the CPU (the same boxes, bit for bit): 1.8x faster on an L40S, where
-        preparing 1080p frames on the CPU was the bottleneck."""
+    def people(self, bgr, threshold: float = 0.2) -> list[np.ndarray]:
+        """Per frame (n, 5): x1 y1 x2 y2 conf, for BGR frames (a list, or an (n, H, W, 3) uint8 array or tensor,
+        which may already be on the device). They become RF-DETR's input on the device, exactly as its predict()
+        would on the CPU (the same boxes, bit for bit): 1.8x faster on an L40S, where preparing 1080p frames on the
+        CPU was the bottleneck."""
         torch = self.torch
         from rfdetr.detr import _uint8_chw_to_float
 
-        x = torch.from_numpy(np.stack(bgr))
-        if self.device == "cuda":
+        x = bgr if torch.is_tensor(bgr) else torch.from_numpy(np.stack(bgr))
+        if self.device == "cuda" and not x.is_cuda:
             x = x.pin_memory().cuda(non_blocking=True)
         x = _uint8_chw_to_float(x.flip(-1).permute(0, 3, 1, 2).contiguous(), self.scale)      # BGR HWC -> RGB CHW
         ds = self.model.predict(list(x), threshold=threshold, include_source_image=False)
@@ -106,10 +107,18 @@ class Ball:
 
 
 class Pose:
-    def __init__(self, device: str = "cuda"):
+    def __init__(self, device: str = "cuda", fp16: bool = False):
+        import torch  # noqa: F401  (loads the CUDA libraries onnxruntime's CUDA provider needs; without, it runs on the CPU)
         from rtmlib import RTMPose
 
         self.m = RTMPose(RTMW_URL, model_input_size=(288, 384), backend="onnxruntime", device=device)
+        if device == "cuda" and fp16:           # 1.6x the crops per second on a 3090 Ti
+            import onnx
+            import onnxruntime as ort
+            from onnxconverter_common import float16
+
+            half = float16.convert_float_to_float16(onnx.load(self.m.onnx_model), keep_io_types=True)
+            self.m.session = ort.InferenceSession(half.SerializeToString(), providers=["CUDAExecutionProvider"])
         shape = self.m.session.get_inputs()[0].shape
         self.batched = not isinstance(shape[0], int) or shape[0] != 1
 
