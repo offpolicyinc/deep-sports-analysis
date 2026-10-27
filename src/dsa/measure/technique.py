@@ -46,10 +46,13 @@ LEFTY = {"Feliciano Lopez", "Fernando Verdasco", "Donald Young", "Adrian Mannari
 
 
 def lefty(player: str, project: str) -> bool:
-    """Left-handed: listed in the project's "lefty", or a pro by full name or (Federer's opponents, named from the
-    match title) surname alone."""
-    return (player in PROJECTS[project].get("lefty", ()) or player in LEFTY
-            or any(player == n.split()[-1] for n in LEFTY))
+    """Left-handed: listed in the project's "lefty"; in a project of pros, also a pro by full name or (Federer's
+    opponents, named from the match title) surname alone. Our own players ("compare_with") only as listed: a
+    right-hander who shares a surname with a left-handed pro is no left-hander."""
+    p = PROJECTS[project]
+    if player in p.get("lefty", ()):
+        return True
+    return not p.get("compare_with") and (player in LEFTY or any(player == n.split()[-1] for n in LEFTY))
 
 
 KINDS = {                     # which hits; the front foot at contact for a right-hander; mirrored for analysis
