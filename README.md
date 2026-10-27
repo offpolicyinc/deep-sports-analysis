@@ -45,7 +45,7 @@ src/dsa/
 tests/       one file per package, on made-up data (no models, no drive): uv run pytest
 ```
 
-Setup: `uv sync --extra cloud`; Opus needs `CLAUDE_CODE_OAUTH_TOKEN` (from `claude setup-token`). Data lives
+Setup: `uv sync --extra cloud`; Opus needs `ANTHROPIC_API_KEY`. Data lives
 under `data/` (the external drive) or `DSA_DATA`; layout and Modal in [docs/STORAGE.md](docs/STORAGE.md).
 
 License: MIT ([LICENSE](LICENSE)), for this repository's code. The models and code it downloads and runs

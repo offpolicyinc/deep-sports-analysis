@@ -1,7 +1,6 @@
 """Ask Claude (Opus) about images, with the answer held to a JSON schema and cached on disk.
 
-Auth: a Claude subscription token (CLAUDE_CODE_OAUTH_TOKEN from `claude setup-token`, or
-ANTHROPIC_AUTH_TOKEN) when set, else ANTHROPIC_API_KEY. The cache key is a hash of model, effort, prompt,
+Auth: ANTHROPIC_API_KEY. The cache key is a hash of model, effort, prompt,
 schema and image bytes, so a rerun only pays for what changed; `<key>.usage.json` beside each answer keeps
 the seconds and tokens of the call.
 """
@@ -10,7 +9,6 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-import os
 import time
 from pathlib import Path
 
@@ -23,12 +21,7 @@ def client():
     if _client is None:
         import anthropic
 
-        token = os.environ.get("ANTHROPIC_AUTH_TOKEN") or os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")
-        if token:
-            _client = anthropic.Anthropic(auth_token=token, api_key=None, base_url="https://api.anthropic.com",
-                                          max_retries=6, default_headers={"anthropic-beta": "oauth-2025-04-20"})
-        else:
-            _client = anthropic.Anthropic(max_retries=6)
+        _client = anthropic.Anthropic(max_retries=6)
     return _client
 
 
@@ -76,7 +69,6 @@ def ask(prompt: str, images: list[Path], schema: dict, cache_dir: str | Path, mo
         with client().messages.stream(
                 model=model, max_tokens=32000, thinking={"type": "adaptive"},
                 output_config={"format": {"type": "json_schema", "schema": _api_schema(schema)}, "effort": effort},
-                system=[{"type": "text", "text": "You are Claude Code, Anthropic's official CLI for Claude."}],
                 messages=[{"role": "user", "content": content}]) as stream:
             r = stream.get_final_message()
         text = "".join(b.text for b in r.content if b.type == "text")
