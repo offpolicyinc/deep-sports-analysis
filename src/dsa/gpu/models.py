@@ -112,13 +112,19 @@ class Pose:
         from rtmlib import RTMPose
 
         self.m = RTMPose(RTMW_URL, model_input_size=(288, 384), backend="onnxruntime", device=device)
-        if device == "cuda" and fp16:           # 1.6x the crops per second on a 3090 Ti
-            import onnx
-            import onnxruntime as ort
-            from onnxconverter_common import float16
+        if fp16:            # 1.6x the crops per second on a 3090 Ti; converted once, kept beside the fp32 file
+            from pathlib import Path
 
-            half = float16.convert_float_to_float16(onnx.load(self.m.onnx_model), keep_io_types=True)
-            self.m.session = ort.InferenceSession(half.SerializeToString(), providers=["CUDAExecutionProvider"])
+            import onnxruntime as ort
+
+            half = Path(self.m.onnx_model).with_suffix(".fp16.onnx")
+            if not half.exists():
+                import onnx
+                from onnxconverter_common import float16
+
+                onnx.save(float16.convert_float_to_float16(onnx.load(self.m.onnx_model), keep_io_types=True), half)
+            provider = "CUDAExecutionProvider" if device == "cuda" else "CPUExecutionProvider"
+            self.m.session = ort.InferenceSession(str(half), providers=[provider])
         shape = self.m.session.get_inputs()[0].shape
         self.batched = not isinstance(shape[0], int) or shape[0] != 1
 
