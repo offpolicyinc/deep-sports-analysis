@@ -76,7 +76,11 @@ def split(picks: list[list], per_frame: list[np.ndarray], ids: list[np.ndarray],
         return {"player": {}, "margin": {}, "looks": {}}
 
     want: dict[int, list[int]] = defaultdict(list)          # frame -> persons to describe there
+    def posed(i: int, p: int) -> bool:                     # a GPU step may pose some frames only (dsa.gpu.process)
+        return any(person_of[int(ids[i][j])] == p and np.isfinite(kp[i][j, 0, 0]) for j in np.flatnonzero(ids[i] >= 0))
+
     for p, fs in seen.items():
+        fs = [i for i in fs if posed(i, p)] or fs
         for i in np.unique(np.linspace(0, len(fs) - 1, min(SAMPLES, len(fs))).astype(int)):
             want[fs[i]].append(p)
     got: dict[int, list[np.ndarray]] = defaultdict(list)

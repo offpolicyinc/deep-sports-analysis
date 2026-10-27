@@ -33,10 +33,14 @@ CHUNK = 64                      # frames decoded before their ball inputs and co
 
 def process(video: str, out: str, tv: bool = False, device: str = "cuda", pose_device: str = "cuda",
             limit: int = 0, batch: int = BATCH, on_pass1=None, breaks=(), near_only: bool = False,
-            court_every: int = 0, models: dict | None = None) -> dict:
+            court_every: int = 0, models: dict | None = None, ball: bool = True,
+            pose_frames: set[int] | None = None) -> dict:
     """TV options (a project's "gpu" in dsa.ingest.projects): near_only poses only people at the near end (a quarter of
     the skeletons, and all the stroke and movement analysis uses); court_every checks the court that often (frames;
-    default COURT_EVERY). models: already loaded ones (load_models), shared by runs side by side on one GPU."""
+    default COURT_EVERY). models: already loaded ones (load_models), shared by runs side by side on one GPU.
+    Phone options, for when the strokes are known already (the app's stroke model): ball=False skips the ball (raw.npz's
+    ball is then all not-found); pose_frames poses only those frames (e.g. around each stroke, and a few for
+    dsa.scene.identity), not every one."""
     import cv2
 
     from dsa.gpu.models import KP, Pose
@@ -75,8 +79,8 @@ def process(video: str, out: str, tv: bool = False, device: str = "cuda", pose_d
         checks = list(z["court"]) if tv else []
         kp = list(np.split(z["kp"], cut)) if tv else []
     else:
-        m = models or load_models(tv, device, pose_device)
-        det, ball, tcd = m["det"], m["ball"], m.get("tcd")
+        m = models or load_models(tv, device, pose_device, ball)
+        det, wasb, tcd = m["det"], m.get("ball"), m.get("tcd")
         if tv:
             pose = m["pose"]
         small: dict[int, np.ndarray] = {}
@@ -109,8 +113,10 @@ def process(video: str, out: str, tv: bool = False, device: str = "cuda", pose_d
         def run_ball(upto: int):                # frames whose next neighbour has arrived (or the last frame)
             t = time.time()
             todo = list(range(len(balls), upto))
-            if todo:
-                balls.extend(ball.locate([[small[i - 1] if i and i not in breaks else small[i], small[i],
+            if todo and not wasb:
+                balls.extend(np.zeros((len(todo), 4), np.float32))
+            elif todo:
+                balls.extend(wasb.locate([[small[i - 1] if i and i not in breaks else small[i], small[i],
                                            small[i + 1] if i + 1 in small and i + 1 not in breaks else small[i]]
                                           for i in todo], W, H))
             for i in [k for k in small if k < upto - 2]:
@@ -123,7 +129,7 @@ def process(video: str, out: str, tv: bool = False, device: str = "cuda", pose_d
             """A chunk's CPU work, run while the GPU works on the chunk before: the ball model's inputs and the
             court checks (a chunk of CHUNK frames holds several, run side by side)."""
             t = time.time()
-            smalls = list(pool.map(ball.small, fs))
+            smalls = list(pool.map(wasb.small, fs)) if wasb else [None] * len(fs)
             got = {}
             if tv:
                 due = [k for k in range(len(fs)) if (i0 + k) % every == 0 or i0 + k in breaks]
@@ -195,7 +201,7 @@ def process(video: str, out: str, tv: bool = False, device: str = "cuda", pose_d
     else:
         kp = [np.full((len(b), len(KP), 3), np.nan, np.float16) for b in boxes]
         want: dict[int, list[int]] = {}
-        for i in range(n):
+        for i in range(n) if pose_frames is None else sorted(f for f in pose_frames if 0 <= f < n):
             for j in np.flatnonzero(ids[i] >= 0):
                 if pp["person_of"][int(ids[i][j])] not in still:
                     want.setdefault(i, []).append(j)
@@ -207,6 +213,8 @@ def process(video: str, out: str, tv: bool = False, device: str = "cuda", pose_d
                 crops.extend((i, j, c) for j, c in zip(js, pool.map(lambda j: pose.prepare(f, boxes[i][j]), js)))
                 if len(crops) >= POSE_BATCH:
                     flush()
+                if i >= max(want):                               # nothing posed after this frame
+                    break
             if crops:
                 flush()
 
@@ -220,11 +228,11 @@ def process(video: str, out: str, tv: bool = False, device: str = "cuda", pose_d
             "posed": posed, "ball_found": int(sum(b[0] for b in balls)), "seconds": tm}
 
 
-def load_models(tv: bool = True, device: str = "cuda", pose_device: str = "cuda") -> dict:
+def load_models(tv: bool = True, device: str = "cuda", pose_device: str = "cuda", ball: bool = True) -> dict:
     """The models process() runs, loaded once (several runs can share them: their calls are thread-safe)."""
     from dsa.gpu.models import Ball, Detector, Pose, Tcd
 
-    m = {"det": Detector(device), "ball": Ball(device)}
+    m = {"det": Detector(device)} | ({"ball": Ball(device)} if ball else {})
     if tv:
         m |= {"tcd": Tcd(device), "pose": Pose(pose_device)}
     return m
