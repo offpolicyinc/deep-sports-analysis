@@ -34,13 +34,14 @@ CHUNK = 64                      # frames decoded before their ball inputs and co
 def process(video: str, out: str, tv: bool = False, device: str = "cuda", pose_device: str = "cuda",
             limit: int = 0, batch: int = BATCH, on_pass1=None, breaks=(), near_only: bool = False,
             court_every: int = 0, models: dict | None = None, ball: bool = True,
-            pose_frames: set[int] | None = None) -> dict:
+            pose_frames: set[int] | None = None, pose_people: int = 0) -> dict:
     """TV options (a project's "gpu" in dsa.ingest.projects): near_only poses only people at the near end (a quarter of
     the skeletons, and all the stroke and movement analysis uses); court_every checks the court that often (frames;
     default COURT_EVERY). models: already loaded ones (load_models), shared by runs side by side on one GPU.
     Phone options, for when the strokes are known already (the app's stroke model): ball=False skips the ball (raw.npz's
-    ball is then all not-found); pose_frames poses only those frames (e.g. around each stroke, and a few for
-    dsa.scene.identity), not every one."""
+    ball is then all not-found); pose_frames poses only those frames (e.g. around each stroke), not every one, and
+    pose_people also up to that many frames of every moving person, spread over their time (dsa.scene.identity
+    tells the two players apart from up to SAMPLES of each)."""
     import cv2
 
     from dsa.gpu.models import KP, Pose
@@ -201,9 +202,17 @@ def process(video: str, out: str, tv: bool = False, device: str = "cuda", pose_d
     else:
         kp = [np.full((len(b), len(KP), 3), np.nan, np.float16) for b in boxes]
         want: dict[int, list[int]] = {}
-        for i in range(n) if pose_frames is None else sorted(f for f in pose_frames if 0 <= f < n):
+        everyone: dict[int, list[tuple[int, int]]] = {}                   # person -> [(frame, box)]
+        for i in range(n):
             for j in np.flatnonzero(ids[i] >= 0):
                 if pp["person_of"][int(ids[i][j])] not in still:
+                    everyone.setdefault(pp["person_of"][int(ids[i][j])], []).append((i, int(j)))
+        chosen = set(range(n)) if pose_frames is None else {f for f in pose_frames if 0 <= f < n}
+        for seen in everyone.values():
+            spread = ({seen[int(k)] for k in np.linspace(0, len(seen) - 1, min(pose_people, len(seen)))}
+                      if pose_people else set())
+            for i, j in seen:
+                if i in chosen or (i, j) in spread:
                     want.setdefault(i, []).append(j)
         posed = sum(map(len, want.values()))
         if want:
