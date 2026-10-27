@@ -52,6 +52,23 @@ def frames(video: str, limit: int = 0, start: int = 0):
         p.wait()
 
 
+def some(video: str, wanted) -> "Iterator[tuple[int, np.ndarray]]":
+    """(i, BGR frame) for each frame i in `wanted`, in order, as frames() gives them: every frame up to the last
+    wanted is decoded, only the wanted ones converted to BGR (OpenCV's grab / retrieve), a third faster."""
+    import cv2
+
+    wanted = set(wanted)
+    cap = cv2.VideoCapture(str(video))
+    try:
+        for i in range(max(wanted) + 1 if wanted else 0):
+            if not cap.grab():
+                return
+            if i in wanted:
+                yield i, cap.retrieve()[1]
+    finally:
+        cap.release()
+
+
 def cut(src: str, start: float, seconds: float, out: Path) -> None:
     """A clip at 30 fps, at most 1080p, no sound."""
     out.parent.mkdir(parents=True, exist_ok=True)
