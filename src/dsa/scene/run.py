@@ -47,7 +47,8 @@ def analyse(video: str, npz: str | Path, work: Path, tv: bool = False, court_mar
         ident = {"player": {}, "margin": {}, "frames": [[None, None]] * n}
     else:
         look = {}
-        ident = identity.split(sides, boxes, ids, pp["person_of"], kp, partial(frames_at, video), tv)
+        looks = {(int(i), int(j)): np.float32(d) for i, j, d in zip(z["look_frame"], z["look_box"], z["look"])} if "look" in z else None
+        ident = identity.split(sides, boxes, ids, pp["person_of"], kp, partial(frames_at, video), tv, looks)
     return {"looks": look, "fps": fps, "size": (W, H), "boxes": boxes, "ids": ids, "kp": kp, "ball": z["ball"], "court": court,
             "court_log": log, "people": pp["people"], "person_of": pp["person_of"], "sides": sides, "hits": hits,
             "player": ident["player"], "margin": ident["margin"], "labels": ident["frames"], "centres": ident.get("centres"), "gpu_seconds": json.loads(str(z["seconds"])),

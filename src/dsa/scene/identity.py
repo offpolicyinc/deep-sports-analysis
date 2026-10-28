@@ -6,7 +6,8 @@ split into two people:
 
   describe   Lab colour histograms (L 4 x a 8 x b 8 bins) of the torso (between shoulders and hips) and the
              shorts (between hips and knees), cut out along the skeleton so no court or background gets in;
-             averaged over up to SAMPLES frames of the id.
+             averaged over up to SAMPLES frames of the id. The app's GPU step works these colours out while
+             it runs and saves them in raw.npz (look); when they're there, they're used and the video isn't opened.
   split      the two ids seen together for longest seed Player 1 and 2; every id then joins the nearer of
              the two (chi-square distance), heaviest ids first, never the one an id was on screen together
              with; the two looks are re-averaged and the split repeated until it settles.
@@ -37,22 +38,28 @@ SHORTS = (11, 12, 14, 13)       # hips, knees
 
 
 def _hist(lab: np.ndarray, poly: np.ndarray) -> np.ndarray | None:
+    poly = np.int32(poly)                               # only the polygon's box is looked at: the same histogram
+    x0, y0 = np.clip(poly.min(0), 0, None)
+    lab, poly = lab[y0:poly[:, 1].max() + 1, x0:poly[:, 0].max() + 1], poly - (x0, y0)
+    if lab.size == 0:
+        return None
     mask = np.zeros(lab.shape[:2], np.uint8)
-    cv2.fillConvexPoly(mask, np.int32(poly), 1)
+    cv2.fillConvexPoly(mask, poly, 1)
     if mask.sum() < 30:
         return None
     h = cv2.calcHist([lab], [0, 1, 2], mask, list(BINS), [0, 256, 0, 256, 0, 256]).ravel()
     return h / h.sum()
 
 
-def describe(bgr: np.ndarray, kp: np.ndarray) -> np.ndarray | None:
-    """Torso + shorts colour of one person in one frame, from their joints; None when not seen well enough."""
+def describe(bgr: np.ndarray | None, kp: np.ndarray, lab: np.ndarray | None = None) -> np.ndarray | None:
+    """Torso + shorts colour of one person in one frame, from their joints; None when not seen well enough. `lab`:
+    the frame already in Lab, in place of `bgr` (several people in one frame)."""
     def good(idx):
         return np.isfinite(kp[list(idx)]).all() and (kp[list(idx), 2] >= MIN_SCORE).all()
 
     if not good(TORSO):
         return None
-    lab = cv2.cvtColor(bgr, cv2.COLOR_BGR2Lab)
+    lab = cv2.cvtColor(bgr, cv2.COLOR_BGR2Lab) if lab is None else lab
     torso = _hist(lab, kp[list(TORSO), :2])
     if torso is None:
         return None
@@ -65,9 +72,10 @@ def chi2(a: np.ndarray, b: np.ndarray) -> float:
 
 
 def split(picks: list[list], per_frame: list[np.ndarray], ids: list[np.ndarray], person_of: dict[int, int],
-          kp: list[np.ndarray], read, tv: bool = False) -> dict:
+          kp: list[np.ndarray], read, tv: bool = False, looks: dict | None = None) -> dict:
     """picks[i]: the players' person ids in frame i (None for an empty side). `read(wanted)` yields (i, BGR frame)
-    for the frame numbers it's given (dsa.video.frames_at). Returns {"player": {person: 0 or 1}, "margin":
+    for the frame numbers it's given (dsa.video.frames_at); unused when `looks` has people described already
+    ({(frame, box): describe's}). Returns {"player": {person: 0 or 1}, "margin":
     {person: float}, "looks": {...}, "frames": per frame [near, far] as 0 / 1 / None, "centres": the two players'
     looks}."""
     seen: dict[int, list[int]] = defaultdict(list)
@@ -81,22 +89,28 @@ def split(picks: list[list], per_frame: list[np.ndarray], ids: list[np.ndarray],
     if not seen:
         return {"player": {}, "margin": {}, "looks": {}}
 
-    want: dict[int, list[int]] = defaultdict(list)          # frame -> persons to describe there
-    def posed(i: int, p: int) -> bool:                     # a GPU step may pose some frames only (dsa.gpu.process)
-        return any(person_of[int(ids[i][j])] == p and np.isfinite(kp[i][j, 0, 0]) for j in np.flatnonzero(ids[i] >= 0))
+    def box(i: int, p: int) -> int | None:                 # p's box in frame i
+        return next((j for j in np.flatnonzero(ids[i] >= 0) if person_of[int(ids[i][j])] == p), None)
 
-    for p, fs in seen.items():
-        fs = [i for i in fs if posed(i, p)] or fs
-        for i in np.unique(np.linspace(0, len(fs) - 1, min(SAMPLES, len(fs))).astype(int)):
-            want[fs[i]].append(p)
+    def spread(fs: list[int]) -> list[int]:                # up to SAMPLES of them, spread out
+        return [fs[i] for i in np.unique(np.linspace(0, len(fs) - 1, min(SAMPLES, len(fs))).astype(int))] if fs else []
+
     got: dict[int, list[np.ndarray]] = defaultdict(list)
-    for i, bgr in read(want):
-        for p in want[i]:
-            j = [j for j in np.flatnonzero(ids[i] >= 0) if person_of[int(ids[i][j])] == p]
-            if j:
-                d = describe(bgr, kp[i][j[0]].astype(np.float32))
-                if d is not None:
-                    got[p].append(d)
+    if looks is not None:
+        for p, fs in seen.items():
+            for i in spread([i for i in fs if (i, box(i, p)) in looks]):
+                got[p].append(looks[i, box(i, p)])
+    else:
+        want: dict[int, list[int]] = defaultdict(list)      # frame -> persons to describe there
+        for p, fs in seen.items():                          # a GPU step may pose some frames only (dsa.gpu.process)
+            for i in spread([i for i in fs if (j := box(i, p)) is not None and np.isfinite(kp[i][j, 0, 0])] or fs):
+                want[i].append(p)
+        for i, bgr in read(want):
+            for p in want[i]:
+                if (j := box(i, p)) is not None:
+                    d = describe(bgr, kp[i][j].astype(np.float32))
+                    if d is not None:
+                        got[p].append(d)
     look = {p: np.mean(v, axis=0) for p, v in got.items()}
     weight = {p: len(seen[p]) for p in look}
     if len(look) < 2:

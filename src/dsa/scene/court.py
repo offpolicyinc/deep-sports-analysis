@@ -1,10 +1,7 @@
 """The court in every frame: 14 points where court lines cross, in the order of POINTS.
 
-  phone   the camera is fixed but gets bumped. Opus marks the court once, OPUS_IN_S in, snapped to the painted
-          lines (dsa.scene.court_snap; kept as marked when the snap fails). Every WINDOW_S a frame is aligned to
-          the marked one by what doesn't move (ORB features, a RANSAC homography: the players moving through
-          don't count, nor do shadows, which have no corners); when the camera has moved the court moves with
-          it. Opus is asked again only when a frame can't be aligned at all: the view itself changed.
+  phone   the camera is fixed: Opus marks the court once, on the video's middle frame, snapped to the painted
+          lines (dsa.scene.court_snap; kept as marked when the snap fails), and it holds for every frame.
   tv      the camera pans and cuts. TennisCourtDetector runs every COURT_EVERY frames on the GPU
           (dsa.gpu.process); its points are kept when they form a plausible whole court, else snapped to the lines.
           A check that jumps away from the ones around it is replaced by their median (`steady`).
@@ -19,14 +16,13 @@ near baseline at the bottom. `homography` maps image points onto it; `in_area` i
 from __future__ import annotations
 
 import argparse
-import subprocess
 from pathlib import Path
 
 import cv2
 import numpy as np
 
 from dsa.paths import video_dir
-from dsa.video import frame_at, info
+from dsa.video import frame_at
 
 POINTS = [
     "far baseline, left doubles corner", "far baseline, right doubles corner",
@@ -43,11 +39,6 @@ LINES = [(0, 1), (2, 3), (0, 2), (1, 3), (4, 5), (6, 7), (8, 9), (10, 11), (12, 
 LEFT, RIGHT, FAR, NEAR, NET, MID = 286, 1379, 561, 2935, 1748, 832
 METRE = 1117 / 10.97
 
-WINDOW_S, OPUS_IN_S = 5.0, 2.0      # phone: the camera checked every 5 s; Opus marks the court 2 s in
-ALIGN_W, RANSAC_PX = 960, 3.0       # frames aligned at 960 px wide, a feature agreeing within 3 px
-MIN_MATCHED, STILL_PX = 60, 6.0     # fewer features agreeing: the view changed; a court within 6 px: not moved
-ORB = cv2.ORB_create(4000)
-MATCHER = cv2.BFMatcher(cv2.NORM_HAMMING, crossCheck=True)
 CONSISTENT = 0.02                   # of the frame's width: a marked point further off the court the rest make is wrong
 COURT_EVERY, COURT_HOLD = 5, 15     # frames (tv): a check every 5 frames; a failed one keeps the last court
 JUMPY, JUMPY_WINDOW = 0.04, 9        # tv: a check off the median of the 9 around it by 4% of the court's width
@@ -154,35 +145,6 @@ def main_camera(pts: np.ndarray, w: int, min_depth: float = MIN_DEPTH) -> bool:
 
 # --- phone --------------------------------------------------------------------------------------------------
 
-def samples(video: str, first: int, step: int) -> np.ndarray:
-    """Frames first, first + step, ... grey and ALIGN_W wide: (k, h, ALIGN_W) uint8."""
-    w, h = info(video)[1:]
-    ah = round(h * ALIGN_W / w / 2) * 2
-    pick = f"select='gte(n\\,{first})*not(mod(n-{first}\\,{step}))',scale={ALIGN_W}:{ah},format=gray"
-    raw = subprocess.run(["ffmpeg", "-v", "error", "-i", str(video), "-vf", pick, "-fps_mode", "passthrough",
-                          "-f", "rawvideo", "-"], capture_output=True, check=True).stdout
-    return np.frombuffer(raw, np.uint8).reshape(-1, ah, ALIGN_W)
-
-
-def align(ref: tuple, grey: np.ndarray, scale: float) -> np.ndarray | None:
-    """The homography taking full-size points of the frame `ref` (orb.detectAndCompute's) was made from to the
-    same points in `grey`, from what doesn't move between them (RANSAC drops the players); None when too little
-    matches: the view changed, not the camera."""
-    kp, des = ORB.detectAndCompute(grey, None)
-    if des is None or ref[1] is None:
-        return None
-    pairs = MATCHER.match(ref[1], des)
-    if len(pairs) < MIN_MATCHED:
-        return None
-    a = np.float32([ref[0][p.queryIdx].pt for p in pairs])
-    b = np.float32([kp[p.trainIdx].pt for p in pairs])
-    m, ok = cv2.findHomography(a, b, cv2.RANSAC, RANSAC_PX)
-    if m is None or ok.sum() < MIN_MATCHED:
-        return None
-    s = np.diag([scale, scale, 1.0])
-    return s @ m @ np.linalg.inv(s)
-
-
 def snap(bgr: np.ndarray, rough: np.ndarray) -> tuple[np.ndarray, bool]:
     """Rough (14, 2+) points snapped to the painted lines; the rough points themselves if the snap fails."""
     from dsa.scene.court_snap import refine
@@ -208,31 +170,15 @@ def ask_opus(video: str, frame: int, work: Path, what: str = "tennis video filme
 
 
 def phone(video: str, work: Path) -> None:
-    """Marks the court of every frame into <work>/court.npz (see the module's docstring): per camera position its
-    first and last frame, its court and how it was found. Needs only the video, so it can run while the GPU step
-    does (dsa.scene.run --court-marked); phone_saved reads it back."""
+    """Marks the court into <work>/court.npz: Opus on the middle frame, for every frame (the module's docstring).
+    Needs only the video, so it can run while the GPU step does (dsa.scene.run --court-marked); phone_saved reads
+    it back."""
     cap = cv2.VideoCapture(str(video))
     fps, n = cap.get(cv2.CAP_PROP_FPS), int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
     cap.release()
-    first, step = min(round(OPUS_IN_S * fps), n - 1), round(WINDOW_S * fps)
-    scale = info(video)[1] / ALIGN_W
-    segs: list[list] = []                                       # [first frame, court, how]
-    ref = court = None                                          # the marked frame's features, and its court
-    for k, g in enumerate(samples(video, first, step)):
-        f = first + k * step
-        m = align(ref, g, scale) if ref else None
-        if m is None:                                           # the start, or a view nothing matches: Opus
-            court, ok = ask_opus(video, f, work)
-            ref = ORB.detectAndCompute(g, None)
-            segs.append([0 if k == 0 else f, court, "Opus" + (", snapped" if ok else ", as marked")])
-            continue
-        moved = cv2.perspectiveTransform(np.float32(court)[:, None, :2], m).reshape(-1, 2)
-        if np.median(np.hypot(*(moved - segs[-1][1][:, :2]).T)) > STILL_PX:
-            segs.append([f, moved, f"camera moved {np.median(np.hypot(*(moved - court[:, :2]).T)):.0f} px, followed"])
-    ends = [s[0] for s in segs[1:]] + [n]
-    np.savez(work / "court.npz", start=np.array([s[0] for s in segs]), end=np.array(ends),
-             points=np.array([s[1][:, :2] for s in segs], float),
-             log=np.array([f"{s[0] / fps:.0f}-{e / fps:.0f} s: {s[2]}" for s, e in zip(segs, ends)]))
+    court, ok = ask_opus(video, n // 2, work)
+    np.savez(work / "court.npz", start=np.array([0]), end=np.array([n]), points=np.array([court[:, :2]], float),
+             log=np.array([f"0-{n / fps:.0f} s: Opus" + (", snapped" if ok else ", as marked")]))
 
 
 def phone_saved(work: Path, n: int) -> tuple[list[np.ndarray | None] | None, list[str]]:
